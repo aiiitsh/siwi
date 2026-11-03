@@ -1,8 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import type OpenAI from "openai";
-import { meta, metaPost, MODELS } from "./meta";
-import { writeEvent, type Agent } from "./events";
+import { meta, metaPost, MODELS, openWeights, OPEN_MODEL } from "./meta";
 import { costUsd, IMAGE_PRICE_USD, type Usage } from "../../config/pricing";
 
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
@@ -16,7 +15,16 @@ export type CallMeta = {
   latencyMs: number;
 };
 
-type Ctx = { gameId?: string | null; season?: number; agent: Agent; step: string };
+export type Agent = "siwi" | "spark" | "pixel" | "tester" | "fixer" | "open" | "system";
+
+/** One model call as reported back to the browser, which keeps the game's event log. */
+export type Trace = {
+  agent: Agent; step: string; model: string; usage: Usage; costUsd: number; latencyMs: number;
+  extra?: Record<string, unknown>;
+};
+
+/** `trace` collects every call a route makes so it can return them to the browser (no server DB). */
+type Ctx = { agent: Agent; step: string; trace?: Trace[] };
 
 async function logCall(ctx: Ctx, m: CallMeta, extra: Record<string, unknown> = {}) {
   console.log(
@@ -24,15 +32,7 @@ async function logCall(ctx: Ctx, m: CallMeta, extra: Record<string, unknown> = {
       `out=${m.usage.outputTokens} (reasoning ${m.usage.reasoningTokens}) imgs=${m.usage.images ?? 0} ` +
       `$${m.costUsd.toFixed(5)} ${m.latencyMs}ms`,
   );
-  await writeEvent({
-    gameId: ctx.gameId,
-    season: ctx.season,
-    agent: ctx.agent,
-    kind: "model_call",
-    message: `${ctx.step} via ${m.model}`,
-    costUsd: m.costUsd,
-    payload: { step: ctx.step, model: m.model, usage: m.usage, latencyMs: m.latencyMs, ...extra },
-  });
+  ctx.trace?.push({ agent: ctx.agent, step: ctx.step, model: m.model, usage: m.usage, costUsd: m.costUsd, latencyMs: m.latencyMs, extra });
 }
 
 function usageFromChat(u: OpenAI.Completions.CompletionUsage | undefined): Usage {
@@ -54,6 +54,8 @@ export type ChatOpts<S extends z.ZodType | undefined> = Ctx & {
   schema?: S;
   schemaName?: string;
   cacheKey?: string;
+  /** "open" routes to Muse Spark Open on Baseten instead of Meta's API. */
+  provider?: "meta" | "open";
 };
 
 export type ChatResult<T> = CallMeta & {
@@ -67,7 +69,8 @@ export type ChatResult<T> = CallMeta & {
 export async function callChat<S extends z.ZodType | undefined = undefined>(
   opts: ChatOpts<S>,
 ): Promise<ChatResult<S extends z.ZodType ? z.infer<S> : null>> {
-  const model = opts.model ?? MODELS.spark;
+  const isOpen = opts.provider === "open";
+  const model = isOpen ? OPEN_MODEL : opts.model ?? MODELS.spark;
   const attempts = opts.schema ? 2 : 1;
   let lastErr: unknown;
   let total: Usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
@@ -78,10 +81,10 @@ export async function callChat<S extends z.ZodType | undefined = undefined>(
     const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model,
       messages: opts.messages,
-      reasoning_effort: (opts.reasoningEffort ?? "medium") as never,
+      ...(isOpen ? {} : { reasoning_effort: (opts.reasoningEffort ?? "medium") as never }),
       ...(opts.maxCompletionTokens ? { max_completion_tokens: opts.maxCompletionTokens } : {}),
       ...(opts.tools ? { tools: opts.tools } : {}),
-      ...(opts.cacheKey ? { prompt_cache_key: opts.cacheKey } : {}),
+      ...(opts.cacheKey && !isOpen ? { prompt_cache_key: opts.cacheKey } : {}),
       ...(opts.schema
         ? {
             response_format: {
@@ -94,7 +97,7 @@ export async function callChat<S extends z.ZodType | undefined = undefined>(
           }
         : {}),
     };
-    const res = await meta().chat.completions.create(body);
+    const res = await (isOpen ? openWeights() : meta()).chat.completions.create(body);
     const u = usageFromChat(res.usage);
     const c = costUsd(model, u);
     total = {
