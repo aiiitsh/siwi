@@ -23,8 +23,8 @@ export async function countTokens(text: string): Promise<{ tokens: number; exact
 
 export async function runEstimate(design: Design, proposal: Proposal, oldCode: string, s1OutputTokens?: number) {
   const p = TOKEN_PRICES[MODELS.spark];
-  const ctx = codingContext();
-  const upgradeText = prompt("code.v1") + "\n\n" + ctx + JSON.stringify(design) + JSON.stringify(proposal) + oldCode;
+  const ctx = codingContext(design.genre ?? "platformer");
+  const upgradeText = prompt("code.v2") + "\n\n" + ctx + JSON.stringify(design) + JSON.stringify(proposal) + oldCode;
   const { tokens: inTok, exact } = await countTokens(upgradeText);
   const ctxTok = Math.min(inTok, Math.ceil(ctx.length / 3.6)); // the shared kit prefix is usually a prompt-cache hit
   const outTok = Math.round((s1OutputTokens ?? 15000) * 1.15);
@@ -44,4 +44,34 @@ export async function runEstimate(design: Design, proposal: Proposal, oldCode: s
   ];
   const totalUsd = lines.reduce((a, l) => a + l.usd, 0);
   return { lines, totalUsd, method: exact ? "Meta token counting API + Season 1 actuals" : "character estimate + Season 1 actuals" };
+}
+
+/**
+ * Season 1 price for a posted idea, after Spark's design (so it is priced from the real design, not a guess).
+ * The design call itself is already spent and is included at its actual cost.
+ */
+export async function runEstimateNew(design: Design, designUsd: number) {
+  const p = TOKEN_PRICES[MODELS.spark];
+  const ctx = codingContext(design.genre ?? "platformer");
+  const { tokens: inTok, exact } = await countTokens(prompt("code.v2") + "\n\n" + ctx + "\nDesign:\n" + JSON.stringify(design, null, 1));
+  const ctxTok = Math.min(inTok, Math.ceil(ctx.length / 3.6));
+  const outTok = 16000; // measured: game.js at medium effort, reasoning included
+  const code = ((inTok - ctxTok) * p.input + ctxTok * p.cachedInput + outTok * p.output) / 1e6;
+  const sprites = design.sprites.length;
+  const images = (sprites + 1) * IMAGE_PRICE_USD;
+  const tests = (2 * (4000 * p.input + 2500 * p.output)) / 1e6;
+  const patch = (inTok * p.input + 12000 * p.output) / 1e6;
+  const siwi = (8 * (1200 * p.input + 400 * p.output)) / 1e6;
+  const sub = code + images + tests + patch + siwi;
+  const lines = [
+    { label: "Spark designed it", usd: designUsd, detail: "already spent (actual cost)" },
+    { label: "Spark writes game.js", usd: code, detail: `${inTok.toLocaleString()} input tokens (${exact ? "counted by Meta's token API" : "estimated"}), ~${outTok.toLocaleString()} output incl. reasoning` },
+    { label: "Pixel paints the art", usd: images, detail: `${sprites} sprites + 1 cover x $${IMAGE_PRICE_USD}` },
+    { label: "Tester plays it", usd: tests, detail: "2 playtests with screenshots + vision verdict" },
+    { label: "Fix reserve", usd: patch, detail: "one patch loop if Tester finds a bug" },
+    { label: "Siwi's decisions", usd: siwi, detail: "about 8 tool-calling checkpoints" },
+    { label: "Safety buffer", usd: sub * 0.2, detail: "20%" },
+  ];
+  const totalUsd = lines.reduce((a, l) => a + l.usd, 0);
+  return { lines, totalUsd, method: exact ? "Meta token counting API on the real build prompt" : "character estimate of the real build prompt" };
 }

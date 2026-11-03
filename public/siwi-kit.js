@@ -4,7 +4,8 @@
  *
  * Two layers:
  *   Siwi.createGame({ width, height, assets, init, update, draw })  low-level loop
- *   Siwi.platformer(config)                                         data-driven platformer (what generated games use)
+ *   Siwi.platformer(config)                                         data-driven side-view platformer
+ *   Siwi.topdown(config)                                            data-driven top-down explorer (mazes, keys, lantern light)
  *
  * The harness reads window.__siwi.state:
  *   { player:{x,y,vx,vy,onGround,facing}, score, lives, level, levelCount, status, frame, time, gravity, events[] }
@@ -21,7 +22,7 @@
   const KEYMAP = {
     ArrowLeft: "left", a: "left", A: "left",
     ArrowRight: "right", d: "right", D: "right",
-    ArrowUp: "jump", w: "jump", W: "jump", " ": "jump", Space: "jump",
+    ArrowUp: "up", w: "up", W: "up", " ": "jump", Space: "jump",
     ArrowDown: "down", s: "down", S: "down",
     x: "action", X: "action", Shift: "action", f: "action", F: "action",
     r: "restart", R: "restart", Enter: "restart",
@@ -89,10 +90,19 @@
       }
       document.body.appendChild(el);
     };
-    pad("left", [["left", "◀"], ["right", "▶"]]);
-    pad("right", [["action", "✦"], ["jump", "▲"]]);
+    if (touchMode === "topdown") {
+      pad("left", [["left", "◀"], ["up", "▲"], ["down", "▼"], ["right", "▶"]]);
+      pad("right", [["action", "✦"]]);
+    } else {
+      pad("left", [["left", "◀"], ["right", "▶"]]);
+      pad("right", [["action", "✦"], ["jump", "▲"]]);
+    }
   }
-  if (document.body) addTouchControls(); else addEventListener("DOMContentLoaded", addTouchControls);
+  let touchMode = "platformer";
+  function setupTouch(mode) {
+    touchMode = mode;
+    if (document.body) addTouchControls(); else addEventListener("DOMContentLoaded", addTouchControls);
+  }
 
   /* ------------------------------------------------------------------ audio (tiny WebAudio beeps, no files) */
   const audio = {
@@ -260,6 +270,7 @@
    * }
    */
   function platformer(cfg) {
+    setupTouch("platformer");
     const legend = Object.assign({}, DEFAULT_LEGEND, cfg.legend || {});
     const pal = Object.assign({}, DEFAULT_PALETTE, cfg.palette || {});
     const P = Object.assign({ speed: 260, jump: 640, w: 34, h: 44, drawW: 58, drawH: 58, doubleJump: false, lives: 3 }, cfg.player || {});
@@ -271,8 +282,9 @@
     const state = {
       player: { x: 0, y: 0, vx: 0, vy: 0, w: P.w, h: P.h, onGround: false, facing: 1 },
       score: 0, lives: P.lives, level: 0, levelCount: levels.length, status: "playing",
-      frame: 0, time: 0, gravity: 1, events: [],
+      frame: 0, time: 0, gravity: 1, events: [], mode: "platformer",
     };
+    const lighting = makeLighting(cfg);
     let grid = [], cols = 0, rows = 0, entities = [], particles = [], floaters = [];
     let spawn = { x: 0, y: 0 }, cam = { x: 0, y: 0 }, shakeT = 0, shakeMag = 0;
     let invuln = 0, jumpsLeft = 0, squash = 1, powers = {}, coyote = 0, jumpBuffer = 0, endTimer = 0;
@@ -480,10 +492,10 @@
       }
 
       // jump (buffered)
-      if (input.wasPressed("jump")) jumpBuffer = 0.12;
+      if (input.wasPressed("jump") || input.wasPressed("up")) jumpBuffer = 0.12;
       if (jumpBuffer > 0) { jumpBuffer -= dt; if (tryJump()) jumpBuffer = 0; }
       // variable jump height
-      if (!input.isDown("jump") && p.vy * state.gravity < -200) p.vy *= 0.85;
+      if (!input.isDown("jump") && !input.isDown("up") && p.vy * state.gravity < -200) p.vy *= 0.85;
 
       // vertical
       p.vy += GRAV * state.gravity * dt;
@@ -559,7 +571,7 @@
       } else if (e.type === "goal") {
         win();
       } else if (e.type === "checkpoint") {
-        if (spawn.x !== e.x0) { spawn = { x: e.x0 + (TILE - P.w) / 2, y: e.y0 + e.h - P.h }; floatText("CHECKPOINT", cx, e.y, "#29D8F5"); SFX.coin(); logEvent("checkpoint"); }
+        if (!e.reached) { e.reached = true; spawn = { x: e.x0 + (TILE - P.w) / 2, y: e.y0 + e.h - P.h }; floatText("CHECKPOINT", cx, e.y, "#29D8F5"); SFX.coin(); logEvent("checkpoint"); }
       } else if (e.type === "enemy") {
         const g = state.gravity;
         const falling = p.vy * g > 50;
@@ -722,8 +734,10 @@
       ctx.globalAlpha = 1;
       for (const f of floaters) { ctx.globalAlpha = clamp(f.life * 2, 0, 1); text(ctx, f.s, f.x, f.y, 18, f.color, "center"); }
       ctx.globalAlpha = 1;
-      if (hooks.onDraw) { try { hooks.onDraw(ctx, api); } catch (err) { reportError(err); } }
       ctx.restore();
+      lighting.draw(ctx, cam, [{ x: state.player.x + P.w / 2, y: state.player.y + P.h / 2, r: lighting.radius * (powers.light ? 1.6 : 1) }]
+        .concat(entities.filter((e) => e.light).map((e) => ({ x: e.x + e.w / 2, y: e.y + e.h / 2, r: e.light }))), state.time);
+      if (hooks.onDraw) { ctx.save(); try { hooks.onDraw(ctx, api); } catch (err) { reportError(err); } ctx.restore(); }
       drawHud(ctx);
     }
 
@@ -761,8 +775,490 @@
     return api;
   }
 
+  /* ------------------------------------------------------------------ lighting (spooky / night games) */
+  // config.darkness 0..0.95 (0 = off), config.light = radius in px around the hero.
+  function makeLighting(cfg) {
+    const darkness = clamp(+cfg.darkness || 0, 0, 0.95);
+    const radius = clamp(+cfg.light || 170, 60, 600);
+    let layer = null;
+    return {
+      radius, darkness,
+      draw(ctx, cam, lights, t) {
+        if (!darkness) return;
+        if (!layer) { layer = document.createElement("canvas"); layer.width = W; layer.height = H; }
+        const l = layer.getContext("2d");
+        l.globalCompositeOperation = "source-over";
+        l.clearRect(0, 0, W, H);
+        l.fillStyle = "rgba(4,5,16," + darkness + ")";
+        l.fillRect(0, 0, W, H);
+        l.globalCompositeOperation = "destination-out";
+        for (const s of lights) {
+          const x = s.x - cam.x, y = s.y - cam.y;
+          const r = s.r * (1 + Math.sin(t * 9 + s.x) * 0.025);
+          if (x < -r || x > W + r || y < -r || y > H + r) continue;
+          const g = l.createRadialGradient(x, y, r * 0.15, x, y, r);
+          g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(0.6, "rgba(0,0,0,.75)"); g.addColorStop(1, "rgba(0,0,0,0)");
+          l.fillStyle = g; l.beginPath(); l.arc(x, y, r, 0, 7); l.fill();
+        }
+        ctx.drawImage(layer, 0, 0);
+        // warm tint inside the hero's light
+        const h = lights[0];
+        if (h) {
+          ctx.save(); ctx.globalCompositeOperation = "lighter";
+          const g = ctx.createRadialGradient(h.x - cam.x, h.y - cam.y, 0, h.x - cam.x, h.y - cam.y, h.r);
+          g.addColorStop(0, "rgba(255,200,61,.10)"); g.addColorStop(1, "rgba(255,200,61,0)");
+          ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
+        }
+      },
+    };
+  }
+
+  /* ------------------------------------------------------------------ top-down explorer */
+  const TD_LEGEND = {
+    "#": { type: "solid" },
+    "P": { type: "player" },
+    "C": { type: "collectible", sprite: "collectible", value: 10 },
+    "E": { type: "enemy", sprite: "enemy", speed: 70 },
+    "F": { type: "enemy", sprite: "enemy2", speed: 55, chase: true, sight: 230 },
+    "^": { type: "hazard", sprite: "hazard" },
+    "G": { type: "goal", sprite: "goal" },
+    "U": { type: "powerup", sprite: "powerup", power: "speed", label: "speed" },
+    "K": { type: "key", sprite: "key" },
+    "D": { type: "door", sprite: "door" },
+    "L": { type: "lamp", sprite: "lamp", light: 150 },
+  };
+  const TD_PALETTE = {
+    floor: "#2a2350", floorAlt: "#2f2858", wall: "#4b3d86", wallTop: "#8B6CFF",
+    accent: "#FFC83D", hud: "#ffffff", hazard: "#FF5A6E", collectible: "#FFC83D", enemy: "#FF6FA5", player: "#29D8F5",
+  };
+
+  /**
+   * Siwi.topdown(config): explore a maze seen from above; collect, avoid, find the exit.
+   * config = { title, assets, palette, legend, levels:[{name, rows}], player:{speed,lives},
+   *   darkness, light, action:"glow"|"dash"|"none", goalNeeds:"none"|"collectibles"|"keys", hooks }
+   */
+  function topdown(cfg) {
+    setupTouch("topdown");
+    const legend = Object.assign({}, TD_LEGEND, cfg.legend || {});
+    const pal = Object.assign({}, TD_PALETTE, cfg.palette || {});
+    const P = Object.assign({ speed: 220, w: 30, h: 30, drawW: 56, drawH: 56, lives: 3 }, cfg.player || {});
+    const hooks = cfg.hooks || {};
+    const action = cfg.action || (cfg.darkness ? "glow" : "dash");
+    const goalNeeds = cfg.goalNeeds || "none";
+    const lighting = makeLighting(cfg);
+    const levels = (cfg.levels || []).filter((l) => l && Array.isArray(l.rows) && l.rows.length);
+    if (!levels.length) throw new Error("siwi: config.levels is empty");
+
+    const state = {
+      player: { x: 0, y: 0, vx: 0, vy: 0, w: P.w, h: P.h, onGround: true, facing: 1 },
+      score: 0, lives: P.lives, level: 0, levelCount: levels.length, status: "playing",
+      frame: 0, time: 0, gravity: 1, events: [], mode: "topdown", keys: 0, collected: 0, toCollect: 0,
+    };
+    let grid = [], cols = 0, rows = 0, entities = [], particles = [], floaters = [];
+    let spawn = { x: 0, y: 0 }, cam = { x: 0, y: 0 }, shakeT = 0, shakeMag = 0;
+    let invuln = 0, powers = {}, endTimer = 0, cooldown = 0, glowT = 0, dashT = 0, walk = 0, hintT = 0, hintMsg = "";
+    let game;
+
+    function logEvent(kind, data) {
+      state.events.push(Object.assign({ kind, t: +state.time.toFixed(2) }, data || {}));
+      if (state.events.length > 60) state.events.shift();
+    }
+
+    function loadLevel(i) {
+      const L = levels[i];
+      rows = L.rows.length;
+      cols = Math.max.apply(null, L.rows.map((r) => r.length));
+      grid = []; entities = []; particles = []; floaters = [];
+      spawn = { x: TILE * 1.5, y: TILE * 1.5 };
+      for (let r = 0; r < rows; r++) {
+        grid.push(new Array(cols).fill(null));
+        for (let c = 0; c < cols; c++) {
+          const ch = L.rows[r][c] || ".";
+          const def = legend[ch];
+          if (!def) continue;
+          const x = c * TILE, y = r * TILE;
+          if (def.type === "solid" || def.type === "door") grid[r][c] = Object.assign({ c, r }, def);
+          else if (def.type === "player") spawn = { x: x + (TILE - P.w) / 2, y: y + (TILE - P.h) / 2 };
+          else {
+            const size = def.size || (def.type === "goal" ? 56 : def.type === "enemy" ? 40 : def.type === "lamp" ? 40 : 30);
+            entities.push(Object.assign({}, def, {
+              ch, x: x + (TILE - size) / 2, y: y + (TILE - size) / 2, w: size, h: size, x0: x, y0: y,
+              dir: Math.random() < 0.5 ? -1 : 1, dx: 0, dy: 0, alive: true, t: Math.random() * 6, stun: 0, turnT: 0,
+            }));
+          }
+        }
+      }
+      for (const e of entities) if (e.type === "enemy" && !e.chase) pickDir(e);
+      state.level = i; state.status = "playing"; state.keys = 0; state.collected = 0;
+      state.toCollect = entities.filter((e) => e.type === "collectible").length;
+      endTimer = 0;
+      respawn(true);
+      logEvent("level_start", { level: i });
+      hooks.onLevelStart && hooks.onLevelStart(api);
+    }
+    function respawn(full) {
+      const p = state.player;
+      p.x = spawn.x; p.y = spawn.y; p.vx = 0; p.vy = 0;
+      if (!full) invuln = 1.5;
+      cam.x = clamp(p.x - W / 2, 0, Math.max(0, cols * TILE - W)); cam.y = clamp(p.y - H / 2, 0, Math.max(0, rows * TILE - H));
+    }
+    let firstLoad = true;
+    function reset() {
+      state.score = 0; state.lives = P.lives; powers = {};
+      const start = firstLoad ? clamp((window.SIWI_START_LEVEL | 0), 0, levels.length - 1) : 0;
+      firstLoad = false;
+      loadLevel(start);
+    }
+
+    function tileAt(c, r) {
+      if (c < 0 || c >= cols || r < 0 || r >= rows) return legend["#"];
+      return grid[r][c];
+    }
+    function solidAt(c, r) { const t = tileAt(c, r); return !!t && (t.type === "solid" || t.type === "door"); }
+    function blocked(o) {
+      const c0 = Math.floor(o.x / TILE), c1 = Math.floor((o.x + o.w - 1) / TILE);
+      const r0 = Math.floor(o.y / TILE), r1 = Math.floor((o.y + o.h - 1) / TILE);
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) if (solidAt(c, r)) return tileAt(c, r);
+      return null;
+    }
+    // Moves o by (dx, dy) one axis at a time; returns the tile that stopped it, if any.
+    function move(o, dx, dy) {
+      let hit = null;
+      if (dx) { o.x += dx; const t = blocked(o); if (t) { hit = t; o.x = dx > 0 ? Math.floor((o.x + o.w) / TILE) * TILE - o.w - 0.01 : (Math.floor(o.x / TILE) + 1) * TILE + 0.01; } }
+      if (dy) { o.y += dy; const t = blocked(o); if (t) { hit = t; o.y = dy > 0 ? Math.floor((o.y + o.h) / TILE) * TILE - o.h - 0.01 : (Math.floor(o.y / TILE) + 1) * TILE + 0.01; } }
+      return hit;
+    }
+    function pickDir(e) {
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      const d = dirs[Math.floor(Math.random() * 4)];
+      e.dx = d[0]; e.dy = d[1]; e.turnT = rand(1.2, 3);
+    }
+
+    function burst(x, y, color, n = 14, speed = 200) {
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
+        particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.4, 0.8), max: 0.8, color, size: rand(3, 7) });
+      }
+    }
+    function confetti(x, y) {
+      const cs = ["#FF6FA5", "#8B6CFF", "#29D8F5", "#A8F03A", "#FFC83D", "#ffffff"];
+      for (let i = 0; i < 80; i++) { const a = rand(0, 7), s = rand(150, 450); particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(1, 1.6), max: 1.6, color: cs[i % 6], size: rand(4, 8), rect: true }); }
+    }
+    function shake(mag = 8, t = 0.25) { shakeMag = mag; shakeT = t; }
+    function floatText(s, x, y, color) { floaters.push({ s, x, y, color: color || pal.accent, life: 1.1 }); }
+    function hint(s) { hintMsg = s; hintT = 2.5; }
+    function addScore(n, x, y) { state.score += n; if (x != null) floatText("+" + n, x, y); }
+
+    function hurt() {
+      if (invuln > 0 || state.status !== "playing") return;
+      if (powers.shield) { powers.shield = false; invuln = 1; shake(5); SFX.stomp(); logEvent("shield_used"); return; }
+      state.lives--;
+      logEvent("hurt", { lives: state.lives });
+      SFX.hurt(); shake(12, 0.35);
+      burst(state.player.x + P.w / 2, state.player.y + P.h / 2, pal.hazard, 22, 260);
+      hooks.onHurt && hooks.onHurt(api);
+      if (state.lives <= 0) { state.status = "lost"; endTimer = 0; logEvent("lost"); SFX.lose(); return; }
+      respawn(false);
+    }
+    function win() {
+      if (state.status !== "playing") return;
+      confetti(state.player.x + P.w / 2, state.player.y);
+      SFX.win();
+      if (state.level < levels.length - 1) { state.status = "levelComplete"; endTimer = 0; logEvent("level_complete", { level: state.level }); }
+      else { state.status = "won"; endTimer = 0; logEvent("won", { score: state.score }); hooks.onWin && hooks.onWin(api); }
+    }
+    function goalOpen() {
+      if (goalNeeds === "collectibles") return state.collected >= state.toCollect;
+      if (goalNeeds === "keys") return !entities.some((e) => e.type === "key" && e.alive);
+      return true;
+    }
+    function doAction() {
+      const p = state.player, cx = p.x + P.w / 2, cy = p.y + P.h / 2;
+      if (cooldown > 0) return;
+      if (action === "glow") {
+        cooldown = 2.2; glowT = 0.9;
+        SFX.power(); burst(cx, cy, pal.accent, 26, 260);
+        for (const e of entities) if (e.type === "enemy" && Math.hypot(e.x + e.w / 2 - cx, e.y + e.h / 2 - cy) < 190) { e.stun = 2.5; floatText("shoo!", e.x + e.w / 2, e.y, "#A8F03A"); }
+      } else if (action === "dash") {
+        cooldown = 0.9; dashT = 0.18; invuln = Math.max(invuln, 0.25);
+        SFX.jump(); burst(cx, cy, "rgba(255,255,255,.7)", 10, 120);
+      }
+      logEvent("action", { action });
+      hooks.onAction && hooks.onAction(api);
+    }
+
+    function update(g, dt) {
+      state.frame++; state.time += dt;
+      if (shakeT > 0) shakeT -= dt;
+      for (const q of particles) { q.life -= dt; q.vx *= 0.94; q.vy *= 0.94; q.x += q.vx * dt; q.y += q.vy * dt; }
+      particles = particles.filter((q) => q.life > 0);
+      for (const f of floaters) { f.life -= dt; f.y -= 40 * dt; }
+      floaters = floaters.filter((f) => f.life > 0);
+      if (hintT > 0) hintT -= dt;
+      if (input.wasPressed("restart") && state.status !== "playing") { reset(); return; }
+      if (state.status === "levelComplete") {
+        endTimer += dt;
+        if (endTimer > 1.6) { const sc = state.score, lv = state.lives; loadLevel(state.level + 1); state.score = sc; state.lives = lv; }
+        return;
+      }
+      if (state.status !== "playing") { endTimer += dt; return; }
+
+      const p = state.player;
+      if (invuln > 0) invuln -= dt;
+      if (cooldown > 0) cooldown -= dt;
+      if (glowT > 0) glowT -= dt;
+      if (dashT > 0) dashT -= dt;
+      let ix = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
+      let iy = (input.isDown("down") ? 1 : 0) - (input.isDown("up") || input.isDown("jump") ? 1 : 0);
+      if (ix && iy) { ix *= 0.7071; iy *= 0.7071; }
+      const speed = P.speed * (powers.speed ? 1.35 : 1) * (dashT > 0 ? 3 : 1);
+      p.vx = lerp(p.vx, ix * speed, 0.3); p.vy = lerp(p.vy, iy * speed, 0.3);
+      if (Math.abs(p.vx) < 2) p.vx = 0;
+      if (Math.abs(p.vy) < 2) p.vy = 0;
+      if (ix) p.facing = ix > 0 ? 1 : -1;
+      if (ix || iy) walk += dt * 10;
+      const hit = move(p, p.vx * dt, p.vy * dt);
+      if (hit && hit.type === "door") {
+        if (state.keys > 0) {
+          state.keys--; grid[hit.r][hit.c] = null;
+          SFX.power(); burst(hit.c * TILE + TILE / 2, hit.r * TILE + TILE / 2, pal.accent, 20, 200);
+          floatText("door opened", hit.c * TILE + TILE / 2, hit.r * TILE, pal.accent); logEvent("door");
+        } else if (hintT <= 0) hint("Locked. Find a key!");
+      }
+      if (input.wasPressed("action")) doAction();
+
+      const pBox = { x: p.x, y: p.y, w: P.w, h: P.h };
+      const pcx = p.x + P.w / 2, pcy = p.y + P.h / 2;
+      for (const e of entities) {
+        if (!e.alive) continue;
+        e.t += dt;
+        if (e.type === "enemy") {
+          if (e.stun > 0) {
+            e.stun -= dt;
+            const ax = e.x + e.w / 2 - pcx, ay = e.y + e.h / 2 - pcy, d = Math.hypot(ax, ay) || 1;
+            move(e, (ax / d) * 60 * dt, (ay / d) * 60 * dt);
+          } else if (e.chase && Math.hypot(e.x + e.w / 2 - pcx, e.y + e.h / 2 - pcy) < (e.sight || 230)) {
+            const ax = pcx - (e.x + e.w / 2), ay = pcy - (e.y + e.h / 2), d = Math.hypot(ax, ay) || 1;
+            move(e, (ax / d) * e.speed * dt, (ay / d) * e.speed * dt);
+            e.dir = ax > 0 ? 1 : -1;
+          } else if (e.speed) {
+            e.turnT -= dt;
+            const t = move(e, e.dx * e.speed * dt * (e.chase ? 0.5 : 1), e.dy * e.speed * dt * (e.chase ? 0.5 : 1));
+            if (t || e.turnT <= 0) pickDir(e);
+            if (e.dx) e.dir = e.dx;
+          }
+        }
+        if (e.type === "custom" && typeof e.update === "function") { try { e.update(e, api, dt); } catch (err) { reportError(err); } }
+        if (!overlap(pBox, e)) continue;
+        touch(e);
+      }
+      entities = entities.filter((e) => e.alive);
+
+      const tx = clamp(pcx - W / 2, 0, Math.max(0, cols * TILE - W)), ty = clamp(pcy - H / 2, 0, Math.max(0, rows * TILE - H));
+      cam.x = lerp(cam.x, tx, 0.14); cam.y = lerp(cam.y, ty, 0.14);
+      if (hooks.onUpdate) { try { hooks.onUpdate(api, dt); } catch (err) { reportError(err); } }
+    }
+
+    function touch(e) {
+      const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+      if (e.type === "collectible") {
+        e.alive = false; state.collected++;
+        addScore(e.value || 10, cx, e.y);
+        SFX.coin(); burst(cx, cy, pal.collectible, 12, 160);
+        logEvent("collect", { score: state.score });
+        hooks.onCollect && hooks.onCollect(e, api);
+      } else if (e.type === "key") {
+        e.alive = false; state.keys++;
+        floatText("KEY!", cx, e.y, pal.accent); SFX.power(); burst(cx, cy, pal.accent, 18, 200);
+        logEvent("key"); hooks.onCollect && hooks.onCollect(e, api);
+      } else if (e.type === "powerup") {
+        e.alive = false;
+        powers[e.power || "speed"] = true;
+        if (e.power === "extraLife") state.lives++;
+        floatText((e.label || e.power || "power").toUpperCase() + "!", cx, e.y, "#A8F03A");
+        SFX.power(); burst(cx, cy, "#A8F03A", 24, 220);
+        logEvent("powerup", { power: e.power });
+        hooks.onPowerup && hooks.onPowerup(e, api);
+      } else if (e.type === "lamp") {
+        if (!e.lit) { e.lit = true; spawn = { x: e.x0 + (TILE - P.w) / 2, y: e.y0 + (TILE - P.h) / 2 }; floatText("safe light", cx, e.y, "#29D8F5"); SFX.coin(); logEvent("checkpoint"); }
+      } else if (e.type === "hazard") {
+        hurt();
+      } else if (e.type === "goal") {
+        if (goalOpen()) win();
+        else if (hintT <= 0) hint(goalNeeds === "keys" ? "Find every key first!" : "Collect everything first! " + state.collected + "/" + state.toCollect);
+      } else if (e.type === "enemy") {
+        if (e.stun <= 0) hurt();
+      } else if (e.type === "custom" && typeof e.touch === "function") {
+        try { e.touch(e, api); } catch (err) { reportError(err); }
+      }
+    }
+
+    function drawFloorAndWalls(ctx, imgs) {
+      const c0 = Math.max(0, Math.floor(cam.x / TILE)), c1 = Math.min(cols - 1, Math.ceil((cam.x + W) / TILE));
+      const r0 = Math.max(0, Math.floor(cam.y / TILE)), r1 = Math.min(rows - 1, Math.ceil((cam.y + H) / TILE));
+      const floor = imgs.floor, wall = imgs.tile;
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        const t = grid[r][c], x = c * TILE, y = r * TILE;
+        if (!t) {
+          if (floor) ctx.drawImage(floor, x, y, TILE, TILE);
+          else { ctx.fillStyle = (r + c) % 2 ? pal.floor : pal.floorAlt; ctx.fillRect(x, y, TILE, TILE); }
+          continue;
+        }
+        if (t.type === "door") {
+          const img = imgs[t.sprite || "door"];
+          if (floor) ctx.drawImage(floor, x, y, TILE, TILE); else { ctx.fillStyle = pal.floor; ctx.fillRect(x, y, TILE, TILE); }
+          if (img) ctx.drawImage(img, x, y, TILE, TILE);
+          else { ctx.fillStyle = "#7a4b2a"; roundRect(ctx, x + 4, y + 2, TILE - 8, TILE - 4, 6); ctx.fill(); ctx.fillStyle = pal.accent; ctx.fillRect(x + TILE / 2 - 4, y + TILE / 2 - 4, 8, 8); }
+          continue;
+        }
+        const img = imgs[t.sprite || "tile"] || wall;
+        if (img) { ctx.drawImage(img, x, y, TILE, TILE); }
+        else {
+          ctx.fillStyle = pal.wall; ctx.fillRect(x, y, TILE, TILE);
+          ctx.fillStyle = pal.wallTop; ctx.fillRect(x, y, TILE, 12);
+          ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.fillRect(x, y + TILE - 5, TILE, 5);
+        }
+        // soft shadow on the floor below a wall
+        if (r + 1 < rows && !grid[r + 1][c]) { ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.fillRect(x, y + TILE, TILE, 8); }
+      }
+    }
+
+    function drawEntity(ctx, e, imgs) {
+      if (e.type === "custom" && typeof e.draw === "function") { try { e.draw(ctx, e, api); } catch (err) { reportError(err); } return; }
+      const img = imgs[e.sprite];
+      const bob = e.type === "collectible" || e.type === "powerup" || e.type === "key" ? Math.sin(e.t * 4) * 3 : 0;
+      const cx = e.x + e.w / 2, cy = e.y + e.h / 2 + bob;
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.beginPath(); ctx.ellipse(cx, e.y + e.h + 2, e.w * 0.4, 6, 0, 0, 7); ctx.fill();
+      if (e.type === "enemy" && e.stun > 0) ctx.globalAlpha = 0.45 + Math.sin(e.t * 20) * 0.1;
+      if (e.type === "goal" && !goalOpen()) ctx.globalAlpha = 0.55;
+      if (img) {
+        const s = e.type === "goal" ? 1.3 : e.type === "enemy" ? 1.3 : 1.2;
+        const wob = e.type === "enemy" ? 1 + Math.sin(e.t * 9) * 0.05 : 1;
+        drawSprite(ctx, img, cx, cy, e.w * s, e.h * s, { flip: e.dir > 0, sy: wob });
+      } else if (e.type === "collectible") {
+        ctx.fillStyle = pal.collectible; ctx.shadowColor = pal.collectible; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.moveTo(cx, cy - 11); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx, cy + 11); ctx.lineTo(cx - 9, cy); ctx.closePath(); ctx.fill();
+      } else if (e.type === "enemy") {
+        ctx.fillStyle = pal.enemy; roundRect(ctx, e.x, e.y, e.w, e.h, 16); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.fillRect(cx - 9, cy - 5, 6, 9); ctx.fillRect(cx + 3, cy - 5, 6, 9);
+      } else if (e.type === "hazard") {
+        ctx.fillStyle = pal.hazard; ctx.beginPath(); ctx.arc(cx, cy, e.w / 2, 0, 7); ctx.fill();
+      } else if (e.type === "goal") {
+        ctx.fillStyle = pal.accent; ctx.shadowColor = pal.accent; ctx.shadowBlur = 20; roundRect(ctx, e.x, e.y, e.w, e.h, 10); ctx.fill();
+      } else if (e.type === "key") {
+        ctx.strokeStyle = pal.accent; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx - 5, cy, 7, 0, 7); ctx.moveTo(cx + 2, cy); ctx.lineTo(cx + 14, cy); ctx.stroke();
+      } else if (e.type === "lamp") {
+        ctx.fillStyle = e.lit ? pal.accent : "#666"; ctx.shadowColor = pal.accent; ctx.shadowBlur = e.lit ? 24 : 0; ctx.beginPath(); ctx.arc(cx, cy, 10, 0, 7); ctx.fill();
+      } else if (e.type === "powerup") {
+        ctx.fillStyle = "#A8F03A"; ctx.shadowColor = "#A8F03A"; ctx.shadowBlur = 16; ctx.beginPath(); ctx.arc(cx, cy, 13, 0, 7); ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawPlayer(ctx, imgs) {
+      const p = state.player;
+      if (invuln > 0 && Math.floor(invuln * 12) % 2 === 0) return;
+      const cx = p.x + P.w / 2, feet = p.y + P.h;
+      const moving = Math.abs(p.vx) + Math.abs(p.vy) > 20;
+      const bounce = moving ? Math.abs(Math.sin(walk)) * 4 : 0;
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(cx, feet + 2, P.w * 0.55, 7, 0, 0, 7); ctx.fill();
+      ctx.translate(cx, feet - bounce);
+      if (powers.shield) { ctx.strokeStyle = "rgba(41,216,245,.8)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, -P.drawH / 2, P.drawW * 0.62, 0, 7); ctx.stroke(); }
+      const img = imgs.hero || imgs.player;
+      if (img) { ctx.scale(p.facing < 0 ? -1 : 1, 1); ctx.drawImage(img, -P.drawW / 2, -P.drawH, P.drawW, P.drawH); }
+      else { ctx.fillStyle = pal.player; roundRect(ctx, -P.w / 2, -P.h - 8, P.w, P.h + 8, 12); ctx.fill(); ctx.fillStyle = "#fff"; ctx.fillRect(-8 + p.facing * 4, -P.h, 6, 10); ctx.fillRect(3 + p.facing * 4, -P.h, 6, 10); }
+      ctx.restore();
+    }
+
+    function drawHud(ctx) {
+      text(ctx, "★ " + state.score + (goalNeeds === "collectibles" ? "  (" + state.collected + "/" + state.toCollect + ")" : ""), 24, 30, 26, pal.hud);
+      let hearts = ""; for (let i = 0; i < Math.max(0, state.lives); i++) hearts += "♥";
+      text(ctx, hearts + (state.keys ? "   🔑×" + state.keys : ""), 24, 64, 24, "#FF5A6E");
+      text(ctx, levels[state.level].name || "Level " + (state.level + 1), W - 24, 30, 20, "rgba(255,255,255,.85)", "right", 700);
+      if (action !== "none") {
+        const ready = cooldown <= 0;
+        text(ctx, (action === "glow" ? "X: lantern glow" : "X: dash") + (ready ? "" : "…"), W - 24, 60, 16, ready ? "#A8F03A" : "rgba(255,255,255,.4)", "right", 700);
+      }
+      if (hintT > 0) text(ctx, hintMsg, W / 2, H - 40, 22, "#fff", "center", 700);
+      if (state.status === "levelComplete") banner(ctx, "Level clear!", "Get ready…", "#A8F03A");
+      if (state.status === "won") banner(ctx, cfg.winText || "You made it!", "Score " + state.score + " · press R to play again", "#FFC83D");
+      if (state.status === "lost") banner(ctx, cfg.loseText || "Game over", "Press R to try again", "#FF5A6E");
+    }
+    function banner(ctx, title, sub, col) {
+      const k = Math.min(1, endTimer * 3);
+      ctx.save();
+      ctx.fillStyle = "rgba(7,9,26," + 0.55 * k + ")"; ctx.fillRect(0, 0, W, H);
+      ctx.translate(W / 2, H / 2 - 20); const s = 0.6 + 0.4 * k; ctx.scale(s, s);
+      text(ctx, title, 0, 0, 64, col, "center"); text(ctx, sub, 0, 60, 22, "#fff", "center", 600);
+      ctx.restore();
+    }
+
+    function draw(g, ctx) {
+      const imgs = g.images;
+      ctx.fillStyle = pal.wall; ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      let sx = 0, sy = 0;
+      if (shakeT > 0) { sx = rand(-1, 1) * shakeMag; sy = rand(-1, 1) * shakeMag; }
+      ctx.translate(Math.round(-cam.x + sx), Math.round(-cam.y + sy));
+      drawFloorAndWalls(ctx, imgs);
+      const sorted = entities.slice().sort((a, b) => a.y + a.h - (b.y + b.h));
+      const py = state.player.y + P.h;
+      let drawn = false;
+      for (const e of sorted) { if (!drawn && e.y + e.h > py) { drawPlayer(ctx, imgs); drawn = true; } drawEntity(ctx, e, imgs); }
+      if (!drawn) drawPlayer(ctx, imgs);
+      for (const q of particles) {
+        ctx.globalAlpha = clamp(q.life / q.max, 0, 1); ctx.fillStyle = q.color;
+        if (q.rect) ctx.fillRect(q.x, q.y, q.size, q.size * 0.6); else { ctx.beginPath(); ctx.arc(q.x, q.y, q.size / 2, 0, 7); ctx.fill(); }
+      }
+      ctx.globalAlpha = 1;
+      for (const f of floaters) { ctx.globalAlpha = clamp(f.life * 2, 0, 1); text(ctx, f.s, f.x, f.y, 18, f.color, "center"); }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      const p = state.player;
+      const lights = [{ x: p.x + P.w / 2, y: p.y + P.h / 2, r: lighting.radius * (powers.light ? 1.6 : 1) * (glowT > 0 ? 1 + glowT : 1) }];
+      for (const e of entities) {
+        if (e.type === "lamp") lights.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, r: e.lit ? e.light || 150 : 50 });
+        else if (e.type === "goal") lights.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, r: 90 });
+        else if (e.type === "collectible" || e.type === "key") lights.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, r: 34 });
+        else if (e.light) lights.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, r: e.light });
+      }
+      lighting.draw(ctx, cam, lights, state.time);
+      if (hooks.onDraw) { ctx.save(); try { hooks.onDraw(ctx, api); } catch (err) { reportError(err); } ctx.restore(); }
+      drawHud(ctx);
+    }
+
+    function reportError(err) {
+      if (!reportError.seen) { reportError.seen = true; setTimeout(() => { throw err; }); }
+    }
+
+    const api = {
+      state, TILE, W, H, input, sfx: SFX, palette: pal, mode: "topdown",
+      get entities() { return entities; },
+      get player() { return state.player; },
+      get camera() { return cam; },
+      get powers() { return powers; },
+      get images() { return game ? game.images : {}; },
+      addScore, hurt, win, lose: () => { state.status = "lost"; endTimer = 0; logEvent("lost"); SFX.lose(); }, shake, burst, confetti, floatText, hint,
+      setPower(name, on = true) { powers[name] = on; },
+      spawn(ch, col, row) {
+        const def = legend[ch]; if (!def) return null;
+        const size = def.size || 30;
+        const e = Object.assign({}, def, { ch, x: col * TILE + (TILE - size) / 2, y: row * TILE + (TILE - size) / 2, w: size, h: size, x0: col * TILE, y0: row * TILE, dir: 1, dx: 0, dy: 0, alive: true, t: 0, stun: 0, turnT: 0 });
+        entities.push(e); return e;
+      },
+      tileAt, solidAt, restart: reset,
+      get level() { return levels[state.level]; },
+    };
+
+    game = createGame({ width: W, height: H, assets: cfg.assets, init: () => { reset(); hooks.onStart && hooks.onStart(api); }, update, draw });
+    window.__siwi = { state, api, game, version: Siwi.version, restart: reset };
+    return api;
+  }
+
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
 
-  const Siwi = { version: "1.0.0", W, H, TILE, input, audio, sfx: SFX, createGame, platformer, loadImages, drawSprite, text, clamp, lerp, rand };
+  const Siwi = { version: "1.1.0", W, H, TILE, input, audio, sfx: SFX, createGame, platformer, topdown, loadImages, drawSprite, text, clamp, lerp, rand };
   window.Siwi = Siwi;
 })();

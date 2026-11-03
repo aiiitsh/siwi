@@ -58,7 +58,7 @@
     return {
       x: Math.round(p.x), y: Math.round(p.y), vx: Math.round(p.vx || 0), vy: Math.round(p.vy || 0),
       onGround: !!p.onGround, score: s.score, lives: s.lives, level: s.level, status: s.status,
-      gravity: s.gravity, frame: s.frame,
+      gravity: s.gravity, frame: s.frame, mode: s.mode || "platformer",
     };
   }
 

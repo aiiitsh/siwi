@@ -1,7 +1,7 @@
 "use client";
 import { assembleGameHtml } from "@/lib/html";
-import { playtest, type TestReport } from "@/lib/playtester";
-import { CAPS, BUDGET_USD, type BuildStatus, type ToolName } from "@/lib/pipeline";
+import { playtest, scriptFor, type TestReport } from "@/lib/playtester";
+import { CAPS, type BuildStatus, type ToolName } from "@/lib/pipeline";
 import type { Design, Verdict, Bug, Proposal } from "@/lib/schemas";
 import { saveGame } from "./db";
 import type { GameRecord, SeasonRecord, GameEvent, AgentId, Trace } from "./types";
@@ -58,7 +58,7 @@ export function isRunning(id: string) { return running.has(id); }
 /* ------------------------------------------------------------------ runner */
 /** A deliberate, clearly labeled break used by "Bug drill" to show Tester + Spark catching and fixing a bug. */
 export const DRILLS = [
-  { id: "typo", label: "a typo in the engine call (game crashes on load)", apply: (c: string) => c.replace("Siwi.platformer(", "Siwi.platfromer(") },
+  { id: "typo", label: "a typo in the engine call (game crashes on load)", apply: (c: string) => c.replace("Siwi.platformer(", "Siwi.platfromer(").replace("Siwi.topdown(", "Siwi.topdwon(") },
 ] as const;
 
 export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks, opts: { drill?: (typeof DRILLS)[number]["id"] } = {}): Promise<void> {
@@ -109,10 +109,13 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
       status.art = "done";
       emit({ agent: "system", kind: "info", msg: `Bug drill: we broke the game on purpose (${drill.label}). Can the crew find and fix it?` });
       emit({ agent: "siwi", kind: "say", msg: "Somebody broke the build! Tester, find out what happened." });
+    } else if (n === 1 && season.design) {
+      const buyers = game.rounds?.find((r) => r.season === 1)?.buyers.length ?? 0;
+      emit({ agent: "siwi", kind: "say", msg: `${buyers} buyer${buyers === 1 ? "" : "s"} funded ${game.creator}'s idea! Spark's design is ready, let's build it.` });
     } else if (n === 1) {
       emit({ agent: "siwi", kind: "say", msg: `New idea from ${game.creator}! Spark, can you design it?` });
       work("spark", "Designing the game");
-      const r = await api("design", { idea: game.idea });
+      const r = await api("design", { idea: game.idea, by: game.creator, materials: await materialsOf(game) });
       addTrace(r.trace);
       season.design = r.design as Design;
       game.title = season.design.title;
@@ -128,7 +131,7 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
       };
       season.assets = { ...prev.assets };
       season.refs = { ...prev.refs };
-      emit({ agent: "siwi", kind: "say", msg: `Season ${n} is funded by ${game.proposal?.pledges.length ?? 0} backers! Same crew, same world. Let's upgrade it.` });
+      emit({ agent: "siwi", kind: "say", msg: `Season ${n} is funded by ${game.rounds?.find((r) => r.season === n)?.buyers.length ?? 0} buyers! Same crew, same world. Let's upgrade it.` });
     }
     status.spentUsd = season.costUsd;
     touch();
@@ -194,11 +197,9 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
     season.finishedAt = Date.now();
     const pass = !!season.test?.pass;
     season.knownIssues = pass ? [] : (season.test?.verdict?.bugs ?? []).filter((b) => b.severity !== "minor").map((b) => b.title);
-    if (n === 1 && !opts.drill) game.owners.push({ name: game.creator, season: 1, amount: round2(season.costUsd) });
-    if (n > 1 && game.proposal && !opts.drill) {
-      game.proposal.status = "built";
-      for (const p of game.proposal.pledges) if (!game.owners.some((o) => o.name === p.name && o.season === n)) game.owners.push({ name: p.name, season: n, amount: p.amount });
-    }
+    const round = game.rounds?.find((r) => r.season === n);
+    if (round && !opts.drill) round.status = "built";
+    if (n > 1 && game.proposal && !opts.drill) game.proposal.status = "built";
     if (season.assets.cover) game.cover = season.assets.cover;
     const mins = ((season.finishedAt - runStart) / 60000).toFixed(1);
     emit({ agent: "siwi", kind: "accept", msg: `${opts.drill ? "Fixed and re-shipped" : "Shipped"} Season ${n} in ${mins} min for $${season.costUsd.toFixed(3)}${pass ? "." : `, with known issues: ${season.knownIssues.join("; ")}`}` });
@@ -230,7 +231,7 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
       const subject = name === "cover"
         ? `${design.hero.name}: ${design.hero.look}, leaping joyfully through ${design.world.setting}. ${n > 1 ? `Season ${n}: ${proposal?.pitch ?? ""}` : ""}`
         : spec?.prompt ?? name;
-      const r = await api("art", { name, subject, style, refs });
+      const r = await api("art", { name, subject, style, refs, genre: design.genre ?? "platformer", refMode: name === "hero" && refs.length && n === 1 ? "players" : "style" });
       addTrace(r.trace);
       season.assets[name] = String(r.dataUri);
       if (r.ref) season.refs[name] = String(r.ref);
@@ -239,7 +240,9 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
     };
     work("pixel", n === 1 ? "Painting the hero first" : "Painting the new Season art");
     emit({ agent: "pixel", kind: "say", msg: n === 1 ? `Hero first, so everything else matches ${design.hero.name}'s style.` : `Reusing ${design.hero.name} as my reference so Season ${n} looks like the same world.` });
-    if (n === 1 && todo.includes("hero")) await one("hero", []);
+    // Players' uploaded pictures guide the hero (and so, through the hero, the whole game's look).
+    const playerRefs = n === 1 ? await playerImages(game) : [];
+    if (n === 1 && todo.includes("hero")) await one("hero", playerRefs);
     const heroRef = season.refs.hero ? [season.refs.hero] : [];
     const rest = todo.filter((x) => x !== "hero");
     // background first in the queue so the cover can use it
@@ -254,7 +257,7 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
 
   async function runTest() {
     work("tester", "Playing the build in a sandbox");
-    emit({ agent: "tester", kind: "say", msg: season.tests === 0 ? "My turn! Running right, jumping, poking everything." : "Playing the patched build again." });
+    emit({ agent: "tester", kind: "say", msg: season.tests === 0 ? (season.design?.genre === "topdown" ? "My turn! Exploring every corridor and poking everything." : "My turn! Running right, jumping, poking everything.") : "Playing the patched build again." });
     live.testing = true; touch();
     // give React a moment to mount the visible test container
     await new Promise((r) => setTimeout(r, 300));
@@ -262,7 +265,7 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks,
     const html = await seasonHtml(season, n > 1 ? Math.max(0, (season.design?.levels.length ?? 1) - 1) : 0);
     let report: TestReport;
     try {
-      report = await playtest(html, { durationMs: 10000, container: hooks.testContainer() ?? undefined, screenshotsAt: [1500, 5000, 9000] });
+      report = await playtest(html, { durationMs: 10000, container: hooks.testContainer() ?? undefined, screenshotsAt: [1500, 5000, 9000], script: scriptFor(season.design?.genre) });
     } finally {
       live.testing = false; touch();
     }
@@ -312,12 +315,43 @@ function trail(r: TestReport): string {
 
 export function round2(x: number) { return Math.round(x * 100) / 100; }
 
-export function newGame(idea: string, creator: string): GameRecord {
+/** A new idea post: no season yet. Players add details, Spark prices it, buyers fund the build. */
+export function newIdea(idea: string, creator: string, images: string[] = []): GameRecord {
   const id = `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   return {
-    id, idea, creator, createdAt: Date.now(), title: "New game",
-    seasons: [newSeason(1, BUDGET_USD.season1)], events: [], comments: [], proposal: null, owners: [],
+    id, idea, creator, createdAt: Date.now(), title: idea.length > 38 ? idea.slice(0, 36) + "…" : idea,
+    seasons: [], events: [], comments: [], proposal: null, owners: [], images, upvotes: [creator], rounds: [],
   };
+}
+
+/** Everything players added to an idea: the post's pictures, and detail comments (with pictures) on Season 1's thread. */
+export async function materialsOf(g: GameRecord): Promise<{ name: string; text?: string; image?: string }[]> {
+  const out: { name: string; text?: string; image?: string }[] = [];
+  for (const im of g.images ?? []) out.push({ name: g.creator, image: await shrink(im, 512) });
+  for (const c of g.comments.filter((c) => (c.season ?? 1) === 1)) out.push({ name: c.name, text: c.body || undefined, image: c.image ? await shrink(c.image, 512) : undefined });
+  return out.slice(0, 40);
+}
+async function playerImages(g: GameRecord): Promise<string[]> {
+  const all = [...(g.images ?? []), ...g.comments.filter((c) => (c.season ?? 1) === 1 && c.image).map((c) => c.image!)];
+  return Promise.all(all.slice(0, 2).map((x) => shrink(x, 512)));
+}
+
+/** Resizes a picture (data URI) to fit max px, as JPEG. Used for uploads and for sending them to the models. */
+export function shrink(src: string, max: number, quality = 0.82): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+      const x = c.getContext("2d")!;
+      x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+      x.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+  });
 }
 export function newSeason(n: number, budgetUsd: number): SeasonRecord {
   return { n, status: "building", design: null, code: null, assets: {}, refs: {}, test: null, tests: 0, patches: [], costUsd: 0, budgetUsd, startedAt: Date.now() };

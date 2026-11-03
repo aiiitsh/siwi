@@ -2,11 +2,11 @@
 // injected harness, and produces a TestReport. The automated checks are deterministic; the vision
 // verdict (Muse Spark looking at the screenshots) happens on the server with this report as input.
 
-export type InputStep = { at: number; key: "left" | "right" | "jump" | "down" | "action"; ms: number };
+export type InputStep = { at: number; key: "left" | "right" | "up" | "jump" | "down" | "action"; ms: number };
 
 export type StateSnap = {
   t?: number; x: number; y: number; vx: number; vy: number; onGround: boolean;
-  score: number; lives: number; level: number; status: string; gravity: number; frame: number;
+  score: number; lives: number; level: number; status: string; gravity: number; frame: number; mode?: string;
 };
 
 export type HarnessError = { kind: string; message: string; line?: number; col?: number; stack?: string; t: number };
@@ -41,6 +41,25 @@ export const DEFAULT_SCRIPT: InputStep[] = [
   { at: 7400, key: "jump", ms: 300 },
 ];
 
+/** Top-down games: wander right and down through the maze, back up, use the action. */
+export const TOPDOWN_SCRIPT: InputStep[] = [
+  { at: 300, key: "right", ms: 1400 },
+  { at: 1800, key: "down", ms: 900 },
+  { at: 2800, key: "right", ms: 1200 },
+  { at: 3200, key: "action", ms: 100 },
+  { at: 4100, key: "up", ms: 900 },
+  { at: 5100, key: "right", ms: 1300 },
+  { at: 5500, key: "down", ms: 800 },
+  { at: 6500, key: "left", ms: 700 },
+  { at: 7300, key: "down", ms: 1200 },
+  { at: 7600, key: "action", ms: 100 },
+  { at: 8600, key: "right", ms: 1200 },
+];
+
+export function scriptFor(genre: string | undefined): InputStep[] {
+  return genre === "topdown" ? TOPDOWN_SCRIPT : DEFAULT_SCRIPT;
+}
+
 export function runChecks(r: Omit<TestReport, "checks" | "pass">): Check[] {
   const checks: Check[] = [];
   checks.push({ id: "boots", pass: r.booted, detail: r.booted ? "kit booted and exposed __siwi" : "game never booted (no __siwi.state)" });
@@ -57,9 +76,16 @@ export function runChecks(r: Omit<TestReport, "checks" | "pass">): Check[] {
   const xs = r.states.map((s) => s.x);
   const moved = xs.length > 1 && Math.max(...xs) - Math.min(...xs) > 60;
   checks.push({ id: "player_moves", pass: moved, detail: moved ? `player x ranged ${Math.min(...xs)}..${Math.max(...xs)}` : "player did not move with right/left input" });
-  const jumped = r.events.some((e) => e.kind === "jump");
-  checks.push({ id: "player_jumps", pass: jumped, detail: jumped ? "jump registered" : "jump input never produced a jump" });
-  const progress = r.events.some((e) => ["collect", "stomp", "powerup", "level_complete", "won", "hurt", "lost"].includes(e.kind));
+  const topdown = r.states.some((s) => s.mode === "topdown");
+  if (topdown) {
+    const ys = r.states.map((s) => s.y);
+    const movedY = ys.length > 1 && Math.max(...ys) - Math.min(...ys) > 40;
+    checks.push({ id: "player_moves_2d", pass: movedY, detail: movedY ? `player y ranged ${Math.min(...ys)}..${Math.max(...ys)}` : "player did not move with up/down input" });
+  } else {
+    const jumped = r.events.some((e) => e.kind === "jump");
+    checks.push({ id: "player_jumps", pass: jumped, detail: jumped ? "jump registered" : "jump input never produced a jump" });
+  }
+  const progress = r.events.some((e) => ["collect", "stomp", "powerup", "level_complete", "won", "hurt", "lost", "key", "door", "checkpoint", "action"].includes(e.kind));
   checks.push({ id: "interactions", pass: progress, detail: progress ? "player interacted with the world" : "no collect/stomp/hurt/win events in the run" });
   return checks;
 }

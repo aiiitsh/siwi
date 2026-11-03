@@ -24,11 +24,11 @@ export function example(name: string): string {
   return s;
 }
 
-/** The stable prefix every coding call shares, so Meta's prompt cache can reuse it. */
-export function codingContext(): string {
+/** The stable prefix every coding call shares (per genre), so Meta's prompt cache can reuse it. */
+export function codingContext(genre: string = "platformer"): string {
+  const examples = genre === "topdown" ? ["candle-manor"] : ["meadow-hop", "gravity-garden"];
   return [
-    prompt("kit-reference.v1"),
-    "## Example game 1 (hand-written)\n```js\n" + example("meadow-hop") + "\n```",
-    "## Example game 2 (hand-written)\n```js\n" + example("gravity-garden") + "\n```",
+    prompt("kit-reference.v2"),
+    ...examples.map((e, i) => `## Example ${genre} game ${i + 1} (hand-written)\n\`\`\`js\n` + example(e) + "\n\`\`\`"),
   ].join("\n\n");
 }

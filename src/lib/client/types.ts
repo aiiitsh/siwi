@@ -28,7 +28,8 @@ export type TestRecord = {
 
 export type SeasonRecord = {
   n: number;
-  status: "building" | "ready" | "failed";
+  /** draft: designed and priced, waiting for buyers to start the build */
+  status: "draft" | "building" | "ready" | "failed";
   design: Design | null;
   code: string | null;
   notes?: string;
@@ -45,7 +46,12 @@ export type SeasonRecord = {
   proposal?: Proposal;
 };
 
-export type Comment = { id: string; name: string; body: string; t: number; simulated?: boolean; season?: number };
+export type Comment = { id: string; name: string; body: string; t: number; simulated?: boolean; season?: number; image?: string };
+
+/** One buy-in round per season. The price is split equally across buyers; each new buyer lowers everyone's share
+ * and the difference goes back to earlier buyers as wallet credits. */
+export type Buyer = { name: string; t: number; paid: number; credited: number; simulated?: boolean };
+export type Round = { season: number; priceUsd: number; estimate: Estimate; buyers: Buyer[]; status: "open" | "building" | "built"; pricedAt: number };
 export type Pledge = { name: string; amount: number; t: number; simulated?: boolean };
 export type Owner = { name: string; season: number; amount: number };
 
@@ -77,5 +83,10 @@ export type GameRecord = {
   events: GameEvent[];
   comments: Comment[];
   proposal: ProposalRecord | null;
+  /** legacy (v1 pledges); v2 derives owners from rounds */
   owners: Owner[];
+  /** v2: pictures attached to the idea post */
+  images?: string[];
+  upvotes?: string[];
+  rounds?: Round[];
 };

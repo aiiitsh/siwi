@@ -3,10 +3,10 @@ import { z } from "zod";
 import sharp from "sharp";
 import type { Trace } from "@/lib/callModel";
 import { callImage } from "@/lib/callModel";
-import { runDesign, runCode, runVerdict, runPatch, runDecide, runCommunity, runProposal, runUpgradeCode, type PlayReport } from "@/lib/agents";
+import { runDesign, runCode, runVerdict, runPatch, runDecide, runCommunity, runIdeaCommunity, runProposal, runUpgradeCode, type PlayReport } from "@/lib/agents";
 import { Design, Proposal, Bug } from "@/lib/schemas";
 import { lintGame } from "@/lib/lint";
-import { runEstimate } from "@/lib/estimate";
+import { runEstimate, runEstimateNew } from "@/lib/estimate";
 import { processImage, kindFor, spritePrompt } from "@/lib/images";
 import { openConfigured } from "@/lib/meta";
 import type { BuildStatus } from "@/lib/pipeline";
@@ -19,7 +19,11 @@ export const maxDuration = 300;
 // model call made (model, tokens, cost, latency).
 
 const Body = {
-  design: z.object({ idea: z.string().min(3).max(400) }),
+  design: z.object({
+    idea: z.string().min(3).max(400),
+    by: z.string().max(30).default("a player"),
+    materials: z.array(z.object({ name: z.string().max(30), text: z.string().max(600).optional(), image: z.string().max(3_000_000).optional() })).max(40).default([]),
+  }),
   code: z.object({ design: Design }),
   lint: z.object({ code: z.string().max(60000) }),
   art: z.object({
@@ -27,14 +31,18 @@ const Body = {
     subject: z.string().max(500),
     style: z.string().max(300),
     refs: z.array(z.string().max(3_000_000)).max(3).default([]),
+    genre: z.enum(["platformer", "topdown"]).default("platformer"),
+    refMode: z.enum(["style", "players"]).default("style"),
   }),
   verdict: z.object({ design: Design.nullable(), report: z.any() }),
   patch: z.object({ code: z.string().max(60000), bugs: z.array(Bug).min(1).max(10), wonder: z.boolean().default(false) }),
   decide: z.object({ status: z.any() }),
   community: z.object({ design: Design }),
+  idea_comments: z.object({ idea: z.string().min(3).max(400), thread: z.array(z.string().max(600)).max(40).default([]) }),
   proposal: z.object({ design: Design, comments: z.array(z.object({ name: z.string().max(30), body: z.string().max(500) })).min(1).max(40), open: z.boolean().default(false) }),
   upgrade: z.object({ design: Design, proposal: Proposal, code: z.string().max(60000) }),
   estimate: z.object({ design: Design, proposal: Proposal, code: z.string().max(60000), s1OutputTokens: z.number().optional() }),
+  price: z.object({ design: Design, designUsd: z.number().min(0).max(5) }),
 };
 
 export async function POST(req: Request, { params }: { params: Promise<{ step: string }> }) {
@@ -55,8 +63,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ step: s
 async function handle(step: string, json: unknown, trace: Trace[]): Promise<Record<string, unknown>> {
   switch (step) {
     case "design": {
-      const { idea } = Body.design.parse(json);
-      return { design: await runDesign(idea, trace) };
+      const { idea, by, materials } = Body.design.parse(json);
+      return { design: await runDesign(idea, trace, materials, by) };
     }
     case "code": {
       const { design } = Body.code.parse(json);
@@ -67,8 +75,8 @@ async function handle(step: string, json: unknown, trace: Trace[]): Promise<Reco
       return { lint: lintGame(code) };
     }
     case "art": {
-      const { name, subject, style, refs } = Body.art.parse(json);
-      const { prompt, size } = spritePrompt(name, subject, style, refs.length > 0);
+      const { name, subject, style, refs, genre, refMode } = Body.art.parse(json);
+      const { prompt, size } = spritePrompt(name, subject, style, refs.length > 0, genre, refMode);
       const img = await callImage({ agent: "pixel", step: `art.${name}`, trace, prompt, size, images: refs.length ? refs : undefined, reasoningStrength: "low" });
       const dataUri = await processImage(img.b64, kindFor(name));
       // The hero also comes back as a mid-size reference image for every later sprite (style anchor).
@@ -93,6 +101,10 @@ async function handle(step: string, json: unknown, trace: Trace[]): Promise<Reco
       const { design } = Body.community.parse(json);
       return { comments: await runCommunity(design, trace) };
     }
+    case "idea_comments": {
+      const { idea, thread } = Body.idea_comments.parse(json);
+      return { comments: await runIdeaCommunity(idea, thread, trace) };
+    }
     case "proposal": {
       const { design, comments, open } = Body.proposal.parse(json);
       const useOpen = open && openConfigured();
@@ -105,6 +117,10 @@ async function handle(step: string, json: unknown, trace: Trace[]): Promise<Reco
     case "estimate": {
       const { design, proposal, code, s1OutputTokens } = Body.estimate.parse(json);
       return { estimate: await runEstimate(design, proposal, code, s1OutputTokens) };
+    }
+    case "price": {
+      const { design, designUsd } = Body.price.parse(json);
+      return { estimate: await runEstimateNew(design, designUsd) };
     }
     default:
       throw new Error(`unknown step ${step}`);
