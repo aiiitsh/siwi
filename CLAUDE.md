@@ -55,5 +55,7 @@ Small commits with clear messages. After each milestone, run the flow end to end
 - Gotcha: the Tester iframe must stay on-screen and painted (tiny, opacity .02). Offscreen/invisible iframes get rAF throttled and every check fails.
 - 2026-11-03 05:00 ET: Live API verified (see docs/meta-api-notes.md log). Supabase dropped. M3-M8 code written: agents (`src/lib/agents.ts`), guardrails (`src/lib/pipeline.ts`), browser runner (`src/lib/client/runner.ts`), crew theater, Season 2 (thread, proposal, token-counted estimate, pledges, upgrade). Work happens on branch `claude/project-thread-uxva81`; Vercel deploys main.
 - Gotcha: Meta's API sometimes returns 504 "request timed out"; the SDK retries (maxRetries 3) and the browser retries each step once.
+- 2026-11-03 06:50 ET: Full flow verified end to end (S1, S2, bug drill). 3 showcase builds in public/showcase (export with scripts/export-showcase.mjs). PR #1 opened to main; Vercel deploys on merge.
+- Gotcha: the visible Tester container must hold only one iframe (replaceChildren), or re-tests render offscreen and get rAF-throttled.
 - Gotcha: don't edit src/ while an e2e run is going on the dev server; hot reload restarts the build.
 - Vercel: project `siwi` under team siwi3, auto-deploys from main; MODEL_API_KEY set there.
