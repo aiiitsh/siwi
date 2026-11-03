@@ -33,7 +33,24 @@ export async function runDesign(idea: string, trace: Trace[], materials: Materia
       { role: "user", content },
     ],
   });
-  return r.data;
+  return normalizeSprites(r.data);
+}
+
+const CANON = ["hero", "enemy", "enemy2", "collectible", "powerup", "goal", "hazard", "tile", "platform", "floor", "key", "door", "lamp", "background"];
+/**
+ * The kit draws the hero, walls, floor and background from fixed asset names. When Spark names a sprite after
+ * the thing ("mabel") and puts the slot in `role` ("hero"), rename it to the slot so the art actually shows up.
+ * (Seen live 2026-11-03: a game shipped with placeholder hero and walls because of this.)
+ */
+export function normalizeSprites(d: Design): Design {
+  const used = new Set(d.sprites.map((x) => x.name));
+  for (const sp of d.sprites) {
+    if (CANON.includes(sp.name)) continue;
+    const role = sp.role.toLowerCase().trim();
+    const slot = CANON.find((c) => role === c || role.startsWith(c + " ") || role.startsWith(c + ":") || role.startsWith(c + " ("));
+    if (slot && !used.has(slot)) { used.delete(sp.name); used.add(slot); sp.name = slot; }
+  }
+  return d;
 }
 
 export function genreOf(code: string): "platformer" | "topdown" {

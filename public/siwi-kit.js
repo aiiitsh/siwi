@@ -571,7 +571,7 @@
       } else if (e.type === "goal") {
         win();
       } else if (e.type === "checkpoint") {
-        if (spawn.x !== e.x0) { spawn = { x: e.x0 + (TILE - P.w) / 2, y: e.y0 + e.h - P.h }; floatText("CHECKPOINT", cx, e.y, "#29D8F5"); SFX.coin(); logEvent("checkpoint"); }
+        if (!e.reached) { e.reached = true; spawn = { x: e.x0 + (TILE - P.w) / 2, y: e.y0 + e.h - P.h }; floatText("CHECKPOINT", cx, e.y, "#29D8F5"); SFX.coin(); logEvent("checkpoint"); }
       } else if (e.type === "enemy") {
         const g = state.gravity;
         const falling = p.vy * g > 50;
