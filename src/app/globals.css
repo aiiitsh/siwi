@@ -1,26 +1,54 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --navy-1: #0b1030;
+  --navy-2: #07091a;
+  --siwi: #ff6fa5;
+  --spark: #8b6cff;
+  --pixel: #29d8f5;
+  --tester: #a8f03a;
+  --gold: #ffc83d;
+  --bug: #ff5a6e;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-siwi: var(--siwi);
+  --color-spark: var(--spark);
+  --color-pixel: var(--pixel);
+  --color-tester: var(--tester);
+  --color-gold: var(--gold);
+  --color-bug: var(--bug);
+  --color-navy: var(--navy-1);
+  --color-navy-deep: var(--navy-2);
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html { color-scheme: dark; }
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+  background: linear-gradient(160deg, var(--navy-1), var(--navy-2));
+  color: #f4f6ff;
+  font-family: var(--font-sans);
 }
+
+/* soft drifting glows + faint stars */
+.siwi-bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.siwi-bg::before, .siwi-bg::after {
+  content: ""; position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; filter: blur(80px); opacity: .22;
+  animation: drift 26s ease-in-out infinite alternate;
+}
+.siwi-bg::before { background: radial-gradient(circle, var(--spark), transparent 60%); left: -20vmax; top: -25vmax; }
+.siwi-bg::after { background: radial-gradient(circle, var(--pixel), transparent 60%); right: -25vmax; bottom: -30vmax; animation-delay: -9s; }
+@keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(8vmax, 6vmax) scale(1.15); } }
+
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: .5;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, #fff, transparent), radial-gradient(1px 1px at 72% 34%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 38% 72%, #fff, transparent), radial-gradient(1px 1px at 88% 82%, #fff, transparent),
+    radial-gradient(1px 1px at 55% 10%, #fff, transparent), radial-gradient(1.5px 1.5px at 22% 90%, #fff, transparent);
+}
+
+.mono { font-family: var(--font-mono); }
+@media (prefers-reduced-motion: reduce) { .siwi-bg::before, .siwi-bg::after { animation: none; } }

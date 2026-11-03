@@ -48,3 +48,9 @@ Cut entirely: real payments, auth, realtime chat, multiplayer, more than one gen
 
 ## Working style
 Small commits with clear messages. After each milestone, run the flow end to end and report what works and what is fake. Boring, reliable code over clever code. Tell Ahmed early when something won't fit the time.
+
+## Status (update as you go)
+- 2026-11-03 04:30 ET: M1 code done (no live call yet: first sandbox had no network to api.meta.ai). M2 done: `public/siwi-kit.js`, `public/siwi-harness.js`, `examples/*.game.js`, `src/lib/playtester.ts` (browser Tester, 7 deterministic checks), `/examples/[slug]` page, `scripts/playtest.mjs` (headless run of any game.js).
+- Gotcha: the Tester iframe must stay on-screen and painted (tiny, opacity .02). Offscreen/invisible iframes get rAF throttled and every check fails.
+- Next: run `/api/health/spark` and `/api/health/image` live and fill the verification log in docs/meta-api-notes.md; create Supabase project "siwi" (Ahmed approved a new free project in org Gaimiz) and apply supabase/migrations/0001_init.sql; then M3.
+- Vercel: project `siwi` under team siwi3, auto-deploys from main; MODEL_API_KEY set there.
