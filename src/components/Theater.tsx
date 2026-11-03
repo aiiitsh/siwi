@@ -20,7 +20,7 @@ export default function Theater({ game, season, live, testRef }: { game: GameRec
   const show: "test" | "patch" | "bugs" | "code" | "art" | "design" =
     live?.testing ? "test"
     : live?.active === "spark" && season.patches.length && lastPatch ? "patch"
-    : live?.active === "fixer" ? "bugs"
+    : live?.active === "fixer" || (live?.active === "tester" && season.tests > 0) ? "bugs"
     : events.at(-1)?.kind === "patch" ? "patch"
     : ["bug", "say"].includes(events.at(-1)?.kind ?? "") && bugs.length && !season.test?.pass && live?.active !== "pixel" && live?.active !== "spark" ? "bugs"
     : live?.active === "spark" && season.code ? "code"
@@ -121,7 +121,7 @@ function CodeView({ code }: { code: string }) {
 function BugBoard({ events, shots }: { events: GameEvent[]; shots: string[] }) {
   return (
     <div className="space-y-3">
-      <div className="text-sm font-bold text-bug">Tester found bugs</div>
+      <div className={`text-sm font-bold ${events.length ? "text-bug" : "text-tester"}`}>{events.length ? "Tester found bugs" : "Tester's screenshots"}</div>
       {events.map((e, i) => {
         const b = (e.data?.bug ?? {}) as { title?: string; evidence?: string; severity?: string };
         return (

@@ -123,7 +123,10 @@ export function playtest(html: string, opts: { durationMs?: number; script?: Inp
     const bootTimer = setTimeout(() => { if (!ready) finish({ booted: false, timedOut: true }); }, 6000);
     const hardTimer = setTimeout(() => finish({ timedOut: true }), durationMs + 8000);
 
-    (opts.container ?? document.body).appendChild(iframe);
+    // One visible sandbox at a time: a leftover iframe would push this one offscreen, and browsers
+    // throttle requestAnimationFrame in offscreen iframes (every check would then fail).
+    if (opts.container) opts.container.replaceChildren(iframe);
+    else document.body.appendChild(iframe);
     iframe.srcdoc = html;
   });
 }

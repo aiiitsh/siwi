@@ -1,17 +1,61 @@
 # Siwi
 
-**Type one sentence. A crew of AI agents running on Meta's models builds a playable browser game for a few cents. Players who chip in co-own it, and vote and pay together for Season 2.**
+**Type one sentence, and a crew of AI agents running on Meta's models builds a playable browser game for a few cents. The players who chip in co-own it, and when they want a sequel, they talk it out, split the cost, and the same crew upgrades the game into Season 2.**
 
-- **Hackathon:** Meta Global AI Developer Hackathon, Indie Developer track
-- **Problem statement:** Build for Your World
-- **Meta models used:** Muse Spark (orchestration, design, code, vision playtesting), Muse Image (all sprites, backgrounds and cover art), Muse Wonder (escalation fixer), Muse Spark Open (open mode). Details are in [docs/meta-api-notes.md](docs/meta-api-notes.md).
+- **Hackathon:** Meta Global AI Developer Hackathon (Cerebral Valley), Indie Developer track.
+- **Problem statement: Build for Your World.** I'm a gamer. I hate paying $50 for a game I play once, then watching the sequel belong to a studio that ignores its players. Siwi lets players make games together, own them, and decide what comes next.
+- **Meta models used (every one is actually called):**
 
-> Work in progress. See [BUILD_LOG.md](BUILD_LOG.md) for what has been built so far.
+| Model | Used for |
+|---|---|
+| **Muse Spark** (`muse-spark-1.3`) | Siwi the producer picks every next step with **tool calling**; Spark writes the **structured** design doc, writes `game.js`, patches bugs, merges the player thread into a Season 2 proposal; Tester judges playtest **screenshots with vision**. Prompt caching on the shared engine-kit prefix. |
+| **Muse Image** (`muse-image-1.0`) | Pixel paints the hero first, then every other sprite, background and cover using the hero as a **reference image** (`/images/edits`) so the whole game looks like one world. Season 2 art reuses the Season 1 hero as reference. |
+| **Muse Wonder** (`muse-wonder-1.0`) | Fixer: called once, only when the same bug survives a Muse Spark patch. |
+| **Token counting** (`/v1/responses/input_tokens`) | Grounds the Season 2 cost estimate (the pledge goal) in the exact size of the real upgrade prompt. |
+| **Muse Spark Open** (open weights, Baseten) | Optional: merges the Season 2 thread when `OPEN_API_KEY`/`OPEN_BASE_URL` are set. The UI labels which model merged it. |
 
-## Run locally
-```bash
-cp .env.example .env.local   # add MODEL_API_KEY and Supabase keys
-npm install
-npm run dev
-# smoke tests: http://localhost:3000/api/health/spark and /api/health/image
+Live: _link added at submission_ · Demo video: _link added at submission_
+
+## How it works
+
 ```
+idea ─► Spark: design doc (structured output)
+          │
+          ▼
+   ┌──► Siwi decides (tool call) ──────────────────────────────────────────┐
+   │      generate_art │ write_code │ run_playtest │ patch_code │ escalate_to_wonder │ accept_build
+   │                   ▼            ▼              ▼            ▼
+   │      Pixel paints  Spark writes  Tester plays    Spark / Fixer
+   │      (hero → refs) game.js on    in a sandbox,   patch with
+   │                    siwi-kit      checks + vision exact edits
+   └─────────────────── every result goes back to Siwi ◄──────────────────┘
+```
+
+- **The model never writes an engine.** It writes `game.js` against our hand-written engine kit (`public/siwi-kit.js`: physics, collisions, camera, input, audio, particles, HUD). Output is one HTML file with the kit, art (data URIs), game code and test harness inlined.
+- **Siwi is a real orchestrator.** Each checkpoint is a Muse Spark tool call. The server enforces guardrails (allowed tools per state, 3 patch loops, 1 Wonder escalation, about 20 images, a per-season budget cap) and falls back to a deterministic rule if the model replies without a tool call (Meta's API supports `tool_choice: "auto"` only).
+- **Tester catches real bugs.** Three layers: a static lint that runs `game.js` in a Node VM against a stub kit (syntax, level shape, one player start, a goal), a sandboxed playtest with scripted input in a visible iframe (7 deterministic checks: boots, no errors, not blank, animates, moves, jumps, interacts), then a Muse Spark vision verdict on the screenshots. Failed checks always fail the build, whatever the model says.
+- **Patches are diffs, not rewrites.** Spark returns exact `{find, replace}` edits; if one doesn't match, it gets one retry with the failure explained. The UI shows the diff.
+- **Season 2 is an upgrade, not a regeneration.** Players comment in the game's thread; Spark merges it into one proposal crediting who asked for what and listing what was left out; Siwi estimates the cost; backers split it (simulated pledges, clearly labeled); when the bar fills, the same crew upgrades the existing `game.js` and paints only the new art with the Season 1 hero as reference. Backers become co-owners.
+- **Every model call is logged** with model, tokens (cached and reasoning), cost and latency, and shown live in the crew log.
+
+## Honesty notes
+- Pledges are simulated: no real payments. "Simulated players" comments are generated by Muse Spark and labeled as such in the UI; you can also type your own.
+- Games are stored in your browser (IndexedDB). There is no account system or server database.
+- Showcase games in the gallery are real recorded builds made by this pipeline, shipped as static files.
+
+## Run it
+```bash
+npm install
+echo "MODEL_API_KEY=..." > .env.local   # from dev.meta.ai → API keys
+npm run dev
+```
+Optional: `OPEN_BASE_URL`, `OPEN_API_KEY`, `OPEN_MODEL` for Muse Spark Open; `SIWI_CODE_EFFORT` (default `medium`).
+
+Headless playtest of any game file: `node scripts/playtest.mjs examples/meadow-hop.game.js`.
+
+## Map
+- `src/lib/agents.ts`: every agent's model call. `src/lib/pipeline.ts`: Siwi's tools and guardrails. `src/lib/client/runner.ts`: the loop the browser drives.
+- `src/lib/callModel.ts`: the one wrapper for all model calls (usage, cost, latency, zod validation).
+- `src/lib/lint.ts`: static checks. `src/lib/playtester.ts` + `public/siwi-harness.js`: the sandbox playtest.
+- `prompts/*.v1.md`: versioned prompts. `config/pricing.ts`: prices. `docs/meta-api-notes.md`: what we verified live.
+- `BUILD_LOG.md`: timestamped milestones. Everything here was built during the hackathon (Oct 27 to Nov 4, 2026).

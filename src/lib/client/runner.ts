@@ -12,9 +12,9 @@ export function loadKit(): Promise<[string, string]> {
   if (!kitP) kitP = Promise.all([fetch("/siwi-kit.js").then((r) => r.text()), fetch("/siwi-harness.js").then((r) => r.text())]);
   return kitP;
 }
-export async function seasonHtml(s: SeasonRecord): Promise<string> {
+export async function seasonHtml(s: SeasonRecord, startLevel = 0): Promise<string> {
   const [kit, harness] = await loadKit();
-  return assembleGameHtml({ kit, harness, title: s.design?.title ?? "Siwi game", gameJs: s.code ?? "", assets: s.assets });
+  return assembleGameHtml({ kit, harness, title: s.design?.title ?? "Siwi game", gameJs: s.code ?? "", assets: s.assets, startLevel });
 }
 
 /* ------------------------------------------------------------------ api */
@@ -56,7 +56,12 @@ const running = new Set<string>();
 export function isRunning(id: string) { return running.has(id); }
 
 /* ------------------------------------------------------------------ runner */
-export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks): Promise<void> {
+/** A deliberate, clearly labeled break used by "Bug drill" to show Tester + Spark catching and fixing a bug. */
+export const DRILLS = [
+  { id: "typo", label: "a typo in the engine call (game crashes on load)", apply: (c: string) => c.replace("Siwi.platformer(", "Siwi.platfromer(") },
+] as const;
+
+export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks, opts: { drill?: (typeof DRILLS)[number]["id"] } = {}): Promise<void> {
   if (running.has(game.id)) return;
   running.add(game.id);
   const live: Live = { active: null, activity: "", speech: {}, artDone: [], artTotal: 0, testing: false, phase: "start" };
@@ -88,10 +93,23 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks)
   let lastBugs: Bug[] = [];
   let artPromise: Promise<void> | null = null;
   let imagesUsed = 0;
+  const runStart = Date.now();
 
   try {
     /* ---- design */
-    if (n === 1) {
+    if (opts.drill) {
+      const drill = DRILLS.find((d) => d.id === opts.drill)!;
+      const broken = drill.apply(season.code ?? "");
+      if (broken === season.code) throw new Error("bug drill could not break this game");
+      season.code = broken;
+      season.status = "building";
+      season.budgetUsd = season.costUsd + 0.5; // a drill gets its own fixing budget
+      status.budgetUsd = season.budgetUsd;
+      status.code = "untested";
+      status.art = "done";
+      emit({ agent: "system", kind: "info", msg: `Bug drill: we broke the game on purpose (${drill.label}). Can the crew find and fix it?` });
+      emit({ agent: "siwi", kind: "say", msg: "Somebody broke the build! Tester, find out what happened." });
+    } else if (n === 1) {
       emit({ agent: "siwi", kind: "say", msg: `New idea from ${game.creator}! Spark, can you design it?` });
       work("spark", "Designing the game");
       const r = await api("design", { idea: game.idea });
@@ -176,14 +194,14 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks)
     season.finishedAt = Date.now();
     const pass = !!season.test?.pass;
     season.knownIssues = pass ? [] : (season.test?.verdict?.bugs ?? []).filter((b) => b.severity !== "minor").map((b) => b.title);
-    if (n === 1) game.owners.push({ name: game.creator, season: 1, amount: round2(season.costUsd) });
-    if (n > 1 && game.proposal) {
+    if (n === 1 && !opts.drill) game.owners.push({ name: game.creator, season: 1, amount: round2(season.costUsd) });
+    if (n > 1 && game.proposal && !opts.drill) {
       game.proposal.status = "built";
       for (const p of game.proposal.pledges) if (!game.owners.some((o) => o.name === p.name && o.season === n)) game.owners.push({ name: p.name, season: n, amount: p.amount });
     }
     if (season.assets.cover) game.cover = season.assets.cover;
-    const mins = ((season.finishedAt - season.startedAt) / 60000).toFixed(1);
-    emit({ agent: "siwi", kind: "accept", msg: `Shipped Season ${n} in ${mins} min for $${season.costUsd.toFixed(3)}${pass ? "." : `, with known issues: ${season.knownIssues.join("; ")}`}` });
+    const mins = ((season.finishedAt - runStart) / 60000).toFixed(1);
+    emit({ agent: "siwi", kind: "accept", msg: `${opts.drill ? "Fixed and re-shipped" : "Shipped"} Season ${n} in ${mins} min for $${season.costUsd.toFixed(3)}${pass ? "." : `, with known issues: ${season.knownIssues.join("; ")}`}` });
     emit({ agent: "siwi", kind: "say", msg: pass ? "It's live! Go play it." : "It's live, with a note about what's still rough." });
     work(null, "");
   } catch (e) {
@@ -240,7 +258,8 @@ export async function runSeason(game: GameRecord, n: number, hooks: RunnerHooks)
     live.testing = true; touch();
     // give React a moment to mount the visible test container
     await new Promise((r) => setTimeout(r, 300));
-    const html = await seasonHtml(season);
+    // In an upgrade, Tester starts on the newest level: that's what changed.
+    const html = await seasonHtml(season, n > 1 ? Math.max(0, (season.design?.levels.length ?? 1) - 1) : 0);
     let report: TestReport;
     try {
       report = await playtest(html, { durationMs: 10000, container: hooks.testContainer() ?? undefined, screenshotsAt: [1500, 5000, 9000] });

@@ -19,7 +19,8 @@ export function metaKey(): string {
 
 /** OpenAI SDK pointed at Meta's OpenAI-compatible endpoint. Server only. */
 export function meta(): OpenAI {
-  if (!client) client = new OpenAI({ baseURL: META_BASE_URL, apiKey: metaKey() });
+  // Meta occasionally answers 504 "request timed out"; the SDK retries 5xx with backoff.
+  if (!client) client = new OpenAI({ baseURL: META_BASE_URL, apiKey: metaKey(), maxRetries: 3, timeout: 280_000 });
   return client;
 }
 

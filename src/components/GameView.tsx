@@ -18,13 +18,15 @@ export default function GameView({ id }: { id: string }) {
   const [showTheater, setShowTheater] = useState(false);
   const testRef = useRef<HTMLDivElement>(null);
 
-  const start = useCallback((g: GameRecord, n: number) => {
+  const [startLevel, setStartLevel] = useState(0);
+  const start = useCallback((g: GameRecord, n: number, drill?: "typo") => {
     setShowTheater(true);
     setViewSeason(n);
+    setStartLevel(0);
     runSeason(g, n, {
       onChange: (gg, l) => { setGame(gg); setLive(l); },
       testContainer: () => testRef.current,
-    }).then(() => setLive(null));
+    }, { drill }).then(() => { setLive(null); setShowTheater(false); });
   }, []);
 
   useEffect(() => {
@@ -46,8 +48,8 @@ export default function GameView({ id }: { id: string }) {
 
   const season = game?.seasons.find((s) => s.n === viewSeason) ?? null;
   useEffect(() => {
-    if (season?.status === "ready" && season.code) seasonHtml(season).then(setHtml);
-  }, [season?.n, season?.status, season?.code, season]);
+    if (season?.status === "ready" && season.code) seasonHtml(season, startLevel).then(setHtml);
+  }, [season?.n, season?.status, season?.code, season, startLevel]);
 
   if (game === undefined) return <div className="p-10 text-white/60">Loading…</div>;
   if (game === null) return <div className="p-10">Game not found. <Link className="text-siwi underline" href="/">Back home</Link></div>;
@@ -84,7 +86,17 @@ export default function GameView({ id }: { id: string }) {
         <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
           <div className="space-y-2">
             <GamePlayer html={html} title={season.design?.title ?? "game"} />
-            <p className="mono text-xs text-white/50">Arrows / WASD move · Space jump · X action · R restart · click the game first</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="mono flex-1 text-xs text-white/50">Arrows / WASD move · Space jump · X action · R restart · click the game first</p>
+              {season.n > 1 && (season.design?.levels.length ?? 0) > 1 && (
+                <button className="rounded-full border border-pixel/50 px-3 py-1 text-xs font-bold text-pixel hover:bg-pixel/10"
+                  onClick={() => setStartLevel(startLevel ? 0 : (season.design?.levels.length ?? 1) - 1)}>
+                  {startLevel ? "Play from level 1" : `Play the new level: ${season.design?.levels.at(-1)?.name}`}
+                </button>
+              )}
+              <button title="Break this game on purpose and watch the crew find and fix it" className="rounded-full border border-bug/50 px-3 py-1 text-xs font-bold text-bug hover:bg-bug/10"
+                onClick={() => start(game, season.n, "typo")}>Bug drill</button>
+            </div>
             {season.knownIssues && season.knownIssues.length > 0 && <p className="text-xs text-bug">Known issues the crew couldn&apos;t fix within budget: {season.knownIssues.join("; ")}</p>}
           </div>
           <aside className="space-y-3">

@@ -15,13 +15,15 @@ export type GameHtmlInput = {
   gameJs: string;
   /** name -> data URI. Inlined so the canvas is never cross-origin tainted. */
   assets?: Record<string, string>;
+  /** Open the game directly at this level index. */
+  startLevel?: number;
 };
 
 /**
  * Harness first (so it catches every error), then kit, assets, game code. The game code gets its own
  * <script> with a sourceURL so runtime errors report line numbers inside game.js.
  */
-export function assembleGameHtml({ kit, harness, title, gameJs, assets = {} }: GameHtmlInput): string {
+export function assembleGameHtml({ kit, harness, title, gameJs, assets = {}, startLevel = 0 }: GameHtmlInput): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
@@ -29,7 +31,7 @@ export function assembleGameHtml({ kit, harness, title, gameJs, assets = {} }: G
 <body><canvas id="game" width="960" height="540"></canvas>
 <script>${safeScript(harness)}</script>
 <script>${safeScript(kit)}</script>
-<script>window.SIWI_ASSETS=${safeScript(JSON.stringify(assets))};</script>
+<script>window.SIWI_ASSETS=${safeScript(JSON.stringify(assets))};window.SIWI_START_LEVEL=${startLevel | 0};</script>
 <script>${safeScript(gameJs)}
 //# sourceURL=game.js</script>
 </body></html>`;

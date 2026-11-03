@@ -5,7 +5,7 @@ import { MODELS } from "./meta";
 import { prompt, codingContext } from "./prompts";
 import { Design, CodeOut, Verdict, PatchOut, Proposal, Community, type Bug } from "./schemas";
 import { lintGame, type LintResult } from "./lint";
-import { allowedTools, fallbackTool, type BuildStatus, type ToolName, TOOL_NAMES } from "./pipeline";
+import { allowedTools, fallbackTool, repeatedBugs, type BuildStatus, type ToolName, TOOL_NAMES } from "./pipeline";
 
 // Measured 2026-11-03: "high" spent ~29k reasoning tokens and 4.6 min on one game.js (mostly counting
 // level columns). "medium" keeps a build inside a serverless request; patches stay on "high".
@@ -147,7 +147,7 @@ export async function runDecide(status: BuildStatus, trace: Trace[]) {
   }));
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: prompt("siwi.v1") },
-    { role: "user", content: "Build status:\n```json\n" + JSON.stringify({ ...status, allowed }, null, 1) + "\n```\nPick the next action." },
+    { role: "user", content: "Build status:\n```json\n" + JSON.stringify({ ...status, repeatedBugs: repeatedBugs(status), allowed }, null, 1) + "\n```\nPick the next action." },
   ];
   for (let attempt = 0; attempt < 2; attempt++) {
     try {

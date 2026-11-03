@@ -45,7 +45,7 @@ export type SeasonRecord = {
   proposal?: Proposal;
 };
 
-export type Comment = { id: string; name: string; body: string; t: number; simulated?: boolean };
+export type Comment = { id: string; name: string; body: string; t: number; simulated?: boolean; season?: number };
 export type Pledge = { name: string; amount: number; t: number; simulated?: boolean };
 export type Owner = { name: string; season: number; amount: number };
 

@@ -26,13 +26,14 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
   const [working, setWorking] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const me = playerName();
+  const thread = game.comments.filter((c) => (c.season ?? 2) === nextN);
 
   const update = async (g: GameRecord) => { setGame({ ...g }); await saveGame(g); };
   const addEvent = (g: GameRecord, agent: GameRecord["events"][number]["agent"], kind: GameRecord["events"][number]["kind"], msg: string, costUsd?: number) =>
     g.events.push({ t: Date.now(), season: nextN, agent, kind, msg, costUsd });
 
   async function addComment(name: string, body: string, simulated = false) {
-    const c: Comment = { id: Math.random().toString(36).slice(2), name, body, t: Date.now(), simulated };
+    const c: Comment = { id: Math.random().toString(36).slice(2), name, body, t: Date.now(), simulated, season: nextN };
     game.comments.push(c);
     await update(game);
   }
@@ -41,7 +42,7 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
     setWorking("players"); setErr(null);
     try {
       const j = await post("community", { design: latest.design });
-      for (const c of j.comments as { name: string; body: string }[]) game.comments.push({ id: Math.random().toString(36).slice(2), name: c.name, body: c.body, t: Date.now(), simulated: true });
+      for (const c of j.comments as { name: string; body: string }[]) game.comments.push({ id: Math.random().toString(36).slice(2), name: c.name, body: c.body, t: Date.now(), simulated: true, season: nextN });
       const cost = (j.trace as { costUsd: number }[]).reduce((a, t) => a + t.costUsd, 0);
       addEvent(game, "siwi", "comment", `Simulated ${j.comments.length} demo players' comments`, cost);
       await update(game);
@@ -52,7 +53,7 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
   async function merge() {
     setWorking("merge"); setErr(null);
     try {
-      const j = await post("proposal", { design: latest.design, comments: game.comments.map((c) => ({ name: c.name, body: c.body })), open: true });
+      const j = await post("proposal", { design: latest.design, comments: thread.map((c) => ({ name: c.name, body: c.body })), open: true });
       const spec = j.proposal as Proposal;
       const s1Out = game.events.filter((e) => e.season === latest.n && e.kind === "model" && String(e.data?.step).match(/^(code|upgrade_code)$/)).map((e) => (e.data?.usage as { outputTokens: number })?.outputTokens).at(-1);
       const est = await post("estimate", { design: latest.design, proposal: spec, code: latest.code, s1OutputTokens: s1Out });
@@ -60,7 +61,7 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
       const goal = Math.max(0.05, Math.ceil(est.estimate.totalUsd * 100) / 100);
       const p: ProposalRecord = { season: nextN, spec, estimate: est.estimate, goalUsd: goal, pledges: [], status: "open", openWeights: !!j.openWeights };
       game.proposal = p;
-      addEvent(game, j.openWeights ? "open" : "spark", "proposal", `Merged ${game.comments.length} comments into “${spec.title}”. Estimated cost $${est.estimate.totalUsd.toFixed(3)}`, cost);
+      addEvent(game, j.openWeights ? "open" : "spark", "proposal", `Merged ${thread.length} comments into “${spec.title}”. Estimated cost $${est.estimate.totalUsd.toFixed(3)}`, cost);
       await update(game);
     } catch (e) { setErr(String(e)); }
     setWorking(null);
@@ -111,8 +112,8 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
       <div className="space-y-2">
         <div className="text-sm font-bold text-white/70">Game thread</div>
         <div className="scroll-thin max-h-72 space-y-2 overflow-y-auto">
-          {game.comments.length === 0 && <p className="text-sm text-white/50">No comments yet. What should Season {nextN} add?</p>}
-          {game.comments.map((c) => (
+          {thread.length === 0 && <p className="text-sm text-white/50">No comments yet. What should Season {nextN} add?</p>}
+          {thread.map((c) => (
             <div key={c.id} className="pop-in rounded-xl bg-white/5 px-3 py-2 text-sm">
               <b>{c.name}</b>{c.simulated && <span className="mono ml-1 text-[10px] text-white/40">simulated player</span>}: {c.body}
             </div>
@@ -120,7 +121,7 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
         </div>
         {!prop && (
           <div className="flex flex-col gap-2 sm:flex-row">
-            <input value={text} onChange={(e) => setText(e.target.value)} maxLength={220} placeholder="I want Season 2 to have…" className="flex-1 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm outline-none focus:border-siwi"
+            <input value={text} onChange={(e) => setText(e.target.value)} maxLength={220} placeholder={`I want Season ${nextN} to have…`} className="flex-1 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm outline-none focus:border-siwi"
               onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { addComment(me, text.trim()); setText(""); } }} />
             <button className="rounded-full bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20" disabled={!text.trim()} onClick={() => { addComment(me, text.trim()); setText(""); }}>Post</button>
             <button className="rounded-full border border-white/15 px-4 py-2 text-sm text-white/80 hover:bg-white/10 disabled:opacity-40" disabled={!!working} onClick={simulatePlayers}>
@@ -131,7 +132,7 @@ export default function SeasonTwo({ game, setGame, startSeason, busy }: Props) {
       </div>
 
       {!prop && (
-        <button disabled={game.comments.length === 0 || !!working || busy} onClick={merge}
+        <button disabled={thread.length === 0 || !!working || busy} onClick={merge}
           className="flex items-center gap-2 rounded-full bg-siwi px-5 py-2.5 font-extrabold text-navy shadow-[0_0_30px_-6px_#FF6FA5] disabled:opacity-40">
           <Avatar id="spark" size={26} active={working === "merge"} />
           {working === "merge" ? "Spark is merging the thread…" : `Merge thread into a Season ${nextN} proposal`}
