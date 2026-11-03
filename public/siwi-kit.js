@@ -64,6 +64,36 @@
   });
   addEventListener("blur", () => { for (const k in input.down) input.down[k] = false; });
 
+  /* ------------------------------------------------------------------ touch controls (phones / tablets) */
+  function addTouchControls() {
+    if (!(window.matchMedia && matchMedia("(pointer: coarse)").matches)) return;
+    const css = document.createElement("style");
+    css.textContent =
+      ".siwi-pad{position:fixed;bottom:2vmin;display:flex;gap:2vmin;z-index:5;user-select:none;-webkit-user-select:none;touch-action:none}" +
+      ".siwi-pad button{width:clamp(34px,13vmin,64px);height:clamp(34px,13vmin,64px);border-radius:50%;border:2px solid rgba(255,255,255,.3);background:rgba(11,16,48,.35);" +
+      "color:#fff;font:800 clamp(14px,5vmin,24px) Inter,system-ui,sans-serif;touch-action:none;opacity:.8}" +
+      ".siwi-pad button.on{background:rgba(255,111,165,.55)}";
+    document.head.appendChild(css);
+    const pad = (side, keys) => {
+      const el = document.createElement("div");
+      el.className = "siwi-pad";
+      el.style[side] = "14px";
+      for (const [k, label] of keys) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        const on = (e) => { e.preventDefault(); b.classList.add("on"); input._set(k, true); };
+        const off = (e) => { e.preventDefault(); b.classList.remove("on"); input._set(k, false); };
+        b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off);
+        b.addEventListener("pointercancel", off); b.addEventListener("pointerleave", off);
+        el.appendChild(b);
+      }
+      document.body.appendChild(el);
+    };
+    pad("left", [["left", "◀"], ["right", "▶"]]);
+    pad("right", [["action", "✦"], ["jump", "▲"]]);
+  }
+  if (document.body) addTouchControls(); else addEventListener("DOMContentLoaded", addTouchControls);
+
   /* ------------------------------------------------------------------ audio (tiny WebAudio beeps, no files) */
   const audio = {
     ctx: null,

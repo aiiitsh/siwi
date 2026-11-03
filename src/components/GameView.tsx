@@ -39,8 +39,15 @@ export default function GameView({ id }: { id: string }) {
       setViewSeason(last.status === "ready" ? last.n : g.seasons.find((s) => s.status === "ready")?.n ?? last.n);
       // A season still marked "building" with nothing running means a fresh game (or an interrupted run): (re)start it.
       if (last.status === "building" && !isRunning(g.id)) {
-        if (last.n === 1 && !last.code && !g.showcase) start(g, 1);
-        else if (last.n > 1) start(g, last.n);
+        if (last.code) {
+          // The page was reloaded mid-build after code existed: keep the last version instead of paying to rebuild.
+          last.status = "ready";
+          last.finishedAt = last.finishedAt ?? Date.now();
+          g.events.push({ t: Date.now(), season: last.n, agent: "system", kind: "info", msg: "The build was interrupted by a page reload; showing the last version the crew wrote." });
+          saveGame(g);
+          setGame({ ...g });
+          setViewSeason(last.n);
+        } else if (!g.showcase) start(g, last.n);
       }
     });
     return () => { alive = false; };
