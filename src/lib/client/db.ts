@@ -42,7 +42,7 @@ export async function deleteGame(id: string): Promise<void> {
 }
 
 /* Pre-built games that ship with the site (real recorded builds), so the gallery is never empty. */
-export type ShowcaseEntry = { id: string; title: string; idea: string; cover?: string; seasons: number; costUsd: number };
+export type ShowcaseEntry = { id: string; title: string; idea: string; cover?: string; seasons: number; costUsd: number; stub?: GameRecord };
 export async function listShowcase(): Promise<ShowcaseEntry[]> {
   try {
     const r = await fetch("/showcase/index.json", { cache: "no-store" });

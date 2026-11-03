@@ -41,7 +41,8 @@ export default function Home() {
     (async () => {
       const local = await listLocalGames().catch(() => [] as GameRecord[]);
       const show = await listShowcase();
-      const showGames = (await Promise.all(show.filter((s) => !local.some((l) => l.id === s.id)).map((s) => loadGame(s.id)))).filter(Boolean) as GameRecord[];
+      // feed cards for showcase games come from light stubs in index.json; the full game loads on its page
+      const showGames = (await Promise.all(show.filter((s) => !local.some((l) => l.id === s.id)).map((s) => s.stub ?? loadGame(s.id)))).filter(Boolean) as GameRecord[];
       setFeed([...local, ...showGames].map(normalize));
     })();
     const refresh = () => listLocalGames().then((local) => setFeed((f) => [...local.map(normalize), ...f.filter((x) => x.showcase && !local.some((l) => l.id === x.id))])).catch(() => {});
@@ -56,7 +57,9 @@ export default function Home() {
     await saveGame(g);
     router.push(`/g/${g.id}`);
   }
-  async function upvote(g: GameRecord) {
+  async function upvote(card: GameRecord) {
+    // showcase cards are light stubs: vote on the full game so the saved local copy stays playable
+    const g = card.showcase && !card.seasons.some((s) => s.code) ? normalize((await loadGame(card.id)) ?? card) : card;
     const u = g.upvotes ?? [];
     g.upvotes = u.includes(me) ? u.filter((x) => x !== me) : [...u, me];
     await saveGame(g);
@@ -79,7 +82,7 @@ export default function Home() {
           </p>
         </section>
 
-        <ol className="mx-auto mt-6 grid max-w-5xl gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <ol className="mx-auto mt-6 grid max-w-5xl grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {HOW.map(([t, d], i) => (
             <li key={t} className="rounded-2xl border border-white/10 bg-white/[.03] p-3">
               <div className="mono text-[10px] text-siwi">step {i + 1}</div>
