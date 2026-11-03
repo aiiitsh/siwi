@@ -59,3 +59,6 @@ Small commits with clear messages. After each milestone, run the flow end to end
 - Gotcha: the visible Tester container must hold only one iframe (replaceChildren), or re-tests render offscreen and get rAF-throttled.
 - Gotcha: don't edit src/ while an e2e run is going on the dev server; hot reload restarts the build.
 - Vercel: project `siwi` under team siwi3, auto-deploys from main; MODEL_API_KEY set there.
+- 2026-11-03 12:25 ET: v2 (Ahmed's direction after testing live): idea feed → details/pictures → Spark design + Siwi price → split buy-ins (price ÷ buyers, earlier buyers credited) → build → buyers play; Season 2 uses the same rounds. Kit has `Siwi.topdown` (keys, doors, lamps, chasers, lantern glow) and darkness for both genres. Market math in `src/lib/client/market.ts`, demo wallets in `wallet.ts`. Prompts v2. Showcase stubs live in `public/showcase/index.json` (export script makes them).
+- Gotcha: Spark sometimes names sprites after the character ("mabel") instead of the kit slot ("hero"); `normalizeSprites` in agents.ts maps them by role.
+- Gotcha: this cloud sandbox's headless Chromium gets 502 on proxied requests longer than 30s; test production by routing /api/agent/** through curl (see scratchpad e2e-prod.cjs pattern) or test against localhost.
