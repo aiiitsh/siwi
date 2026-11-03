@@ -27,6 +27,12 @@ const SCRIPT = [
   { at: 6000, key: "jump", ms: 300 },
 ];
 
+const TOPDOWN = [
+  { at: 300, key: "right", ms: 1400 }, { at: 1800, key: "down", ms: 900 }, { at: 2800, key: "right", ms: 1200 },
+  { at: 3200, key: "action", ms: 100 }, { at: 4100, key: "up", ms: 900 }, { at: 5100, key: "right", ms: 1300 },
+  { at: 5500, key: "down", ms: 800 }, { at: 6500, key: "left", ms: 700 }, { at: 7300, key: "down", ms: 1200 },
+];
+if (/Siwi\.topdown\(/.test(gameJs)) SCRIPT.splice(0, SCRIPT.length, ...TOPDOWN);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 600 } });
 await page.setContent(`<html><body style="margin:0;background:#000"><iframe id="f" sandbox="allow-scripts" style="width:960px;height:540px;border:0"></iframe></body></html>`);

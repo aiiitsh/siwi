@@ -12,25 +12,42 @@ import { allowedTools, fallbackTool, repeatedBugs, type BuildStatus, type ToolNa
 const CODE_EFFORT = (process.env.SIWI_CODE_EFFORT ?? "medium") as "medium" | "high" | "low";
 
 /* ------------------------------------------------------------------ Spark: design */
-export async function runDesign(idea: string, trace: Trace[]) {
+export type Material = { name: string; text?: string; image?: string };
+
+/** Spark designs from the idea plus everything players added to the post: detail comments, notes, and pictures (vision). */
+export async function runDesign(idea: string, trace: Trace[], materials: Material[] = [], by = "a player") {
+  const texts = materials.filter((m) => m.text).slice(0, 30).map((m) => `- ${m.name}: ${m.text!.slice(0, 400)}`);
+  const imgs = materials.filter((m) => m.image).slice(0, 4);
+  const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [{
+    type: "text",
+    text: `Idea posted by ${by}: "${idea.slice(0, 400)}"` +
+      (texts.length ? `\n\nDetails players added in the thread:\n${texts.join("\n")}` : "") +
+      (imgs.length ? `\n\nPictures players uploaded (in order): ${imgs.map((m, i) => `#${i + 1} from ${m.name}${m.text ? ` (${m.text.slice(0, 80)})` : ""}`).join(", ")}.` : ""),
+  }];
+  for (const m of imgs) content.push({ type: "image_url", image_url: { url: m.image!, detail: "low" } });
   const r = await callChat({
     agent: "spark", step: "design", trace, schema: Design, schemaName: "game_design", reasoningEffort: "medium",
-    cacheKey: "siwi-design-v1",
+    cacheKey: "siwi-design-v2",
     messages: [
-      { role: "system", content: prompt("design.v1") },
-      { role: "user", content: `Player's idea: "${idea.slice(0, 400)}"` },
+      { role: "system", content: prompt("design.v2") },
+      { role: "user", content },
     ],
   });
   return r.data;
 }
 
+export function genreOf(code: string): "platformer" | "topdown" {
+  return /Siwi\.topdown\s*\(/.test(code) ? "topdown" : "platformer";
+}
+
 /* ------------------------------------------------------------------ Spark: code */
 export async function runCode(design: Design, trace: Trace[]) {
+  const genre = design.genre ?? "platformer";
   const r = await callChat({
     agent: "spark", step: "code", trace, schema: CodeOut, schemaName: "game_code", reasoningEffort: CODE_EFFORT,
-    cacheKey: "siwi-code-v1", maxCompletionTokens: 40000,
+    cacheKey: `siwi-code-v2-${genre}`, maxCompletionTokens: 40000,
     messages: [
-      { role: "system", content: prompt("code.v1") + "\n\n" + codingContext() },
+      { role: "system", content: prompt("code.v2") + "\n\n" + codingContext(genre) },
       { role: "user", content: "Design:\n```json\n" + JSON.stringify(design, null, 1) + "\n```" },
     ],
   });
@@ -54,7 +71,7 @@ export type PlayReport = {
 export async function runVerdict(design: Design | null, report: PlayReport, trace: Trace[]) {
   const failed = report.checks.filter((c) => !c.pass);
   const text = [
-    `Game: ${design?.title ?? "unknown"}. Special mechanic: ${design?.specialMechanic?.name ?? "none"}.`,
+    `Game: ${design?.title ?? "unknown"} (${design?.genre ?? "platformer"}, lighting ${design?.lighting ?? "day"}). Special mechanic: ${design?.specialMechanic?.name ?? "none"}.`,
     "Automated checks:\n" + report.checks.map((c) => `- ${c.pass ? "PASS" : "FAIL"} ${c.id}: ${c.detail}`).join("\n"),
     report.lint?.issues.length ? "Static lint issues:\n" + report.lint.issues.map((i) => `- ${i.id}: ${i.message}${i.line ? ` (game.js line ${i.line})` : ""}`).join("\n") : "Static lint: ok",
     report.errors.length ? "Runtime errors:\n" + report.errors.slice(0, 6).map((e) => `- ${e.kind}: ${e.message}${e.line ? ` (line ${e.line})` : ""}`).join("\n") : "Runtime errors: none",
@@ -65,8 +82,8 @@ export async function runVerdict(design: Design | null, report: PlayReport, trac
   for (const s of report.screenshots.slice(0, 4)) content.push({ type: "image_url", image_url: { url: s, detail: "low" } });
   const r = await callChat({
     agent: "tester", step: "verdict", trace, schema: Verdict, schemaName: "playtest_verdict", reasoningEffort: "medium",
-    cacheKey: "siwi-tester-v1",
-    messages: [{ role: "system", content: prompt("tester.v1") }, { role: "user", content }],
+    cacheKey: "siwi-tester-v2",
+    messages: [{ role: "system", content: prompt("tester.v2") }, { role: "user", content }],
   });
   const v = r.data;
   // Deterministic floor: a failed automated check or lint issue always fails the build.
@@ -86,7 +103,7 @@ export async function runPatch(code: string, bugs: Bug[], useWonder: boolean, tr
   const numbered = code.split("\n").map((l, i) => `${String(i + 1).padStart(4)}| ${l}`).join("\n");
   const agentName = useWonder ? "Fixer" : "Spark";
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: prompt("patch.v1").replace("{{AGENT}}", agentName) + "\n\n" + codingContext() },
+    { role: "system", content: prompt("patch.v1").replace("{{AGENT}}", agentName) + "\n\n" + codingContext(genreOf(code)) },
     {
       role: "user",
       content:
@@ -97,7 +114,7 @@ export async function runPatch(code: string, bugs: Bug[], useWonder: boolean, tr
   const opts = {
     agent: useWonder ? ("fixer" as const) : ("spark" as const), step: useWonder ? "escalate" : "patch", trace,
     schema: PatchOut, schemaName: "code_patch", reasoningEffort: "high" as const, maxCompletionTokens: 40000,
-    model: useWonder ? MODELS.wonder : MODELS.spark, cacheKey: useWonder ? "siwi-fixer-v1" : "siwi-patch-v1",
+    model: useWonder ? MODELS.wonder : MODELS.spark, cacheKey: `${useWonder ? "siwi-fixer-v2" : "siwi-patch-v2"}-${genreOf(code)}`,
   };
   let r = await callChat({ ...opts, messages });
   let applied = applyEdits(code, r.data.edits);
@@ -190,21 +207,22 @@ export async function runProposal(design: Design, comments: { name: string; body
       {
         role: "system",
         content:
-          "You are Spark. Merge a game's player thread into ONE Season 2 proposal the crew can build as an upgrade of the existing game on the same engine kit (side-view platformer: levels, collectibles, enemies, powerups, gravity flip, double jump, one custom entity type). " +
+          "You are Spark. Merge a game's player thread into ONE Season 2 proposal the crew can build as an upgrade of the existing game on the same engine kit and the SAME genre (platformer: levels, collectibles, enemies, powerups, gravity flip, double jump, darkness, one custom entity type; top-down: rooms, keys and doors, lamps, chasing critters, lantern glow, dash, darkness, one custom entity type). " +
           "Keep everything that works; add 2 to 4 concrete changes, exactly one new level, and at most 3 new sprites. Credit the players who asked for each change. List ideas you leave out and why (too big, off-theme, or not possible in the kit). Gentle and original only.",
       },
-      { role: "user", content: JSON.stringify({ season1: { title: design.title, story: design.story, hero: design.hero, mechanic: design.specialMechanic, levels: design.levels, sprites: design.sprites.map((s) => s.name) }, thread: comments }) },
+      { role: "user", content: JSON.stringify({ season1: { title: design.title, genre: design.genre ?? "platformer", story: design.story, hero: design.hero, mechanic: design.specialMechanic, levels: design.levels, sprites: design.sprites.map((s) => s.name) }, thread: comments }) },
     ],
   });
   return r.data;
 }
 
 export async function runUpgradeCode(design: Design, proposal: Proposal, oldCode: string, trace: Trace[]) {
+  const genre = genreOf(oldCode);
   const r = await callChat({
     agent: "spark", step: "upgrade_code", trace, schema: CodeOut, schemaName: "game_code", reasoningEffort: CODE_EFFORT,
-    cacheKey: "siwi-code-v1", maxCompletionTokens: 40000,
+    cacheKey: `siwi-code-v2-${genre}`, maxCompletionTokens: 40000,
     messages: [
-      { role: "system", content: prompt("code.v1") + "\n\n" + codingContext() },
+      { role: "system", content: prompt("code.v2") + "\n\n" + codingContext(genre) },
       {
         role: "user",
         content:

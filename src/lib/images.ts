@@ -60,28 +60,41 @@ export async function processImage(b64: string, kind: SpriteKind): Promise<strin
 
 export function kindFor(name: string): SpriteKind {
   if (name === "background") return "background";
-  if (name === "tile") return "tile";
+  if (name === "tile" || name === "floor") return "tile";
   if (name === "platform") return "platform";
   if (name === "cover") return "cover";
   return "sprite";
 }
 
-/** Builds Pixel's prompt for a sprite. The hero is the style anchor for everything else. */
-export function spritePrompt(name: string, subject: string, styleNote: string, hasRef: boolean): { prompt: string; size: string } {
+/**
+ * Builds Pixel's prompt for a sprite. The hero is the style anchor for everything else.
+ * refMode "style": copy only the style of the references (crew's own hero/background).
+ * refMode "players": the references are players' uploads; follow them for look and style.
+ */
+export function spritePrompt(name: string, subject: string, styleNote: string, hasRef: boolean, genre: "platformer" | "topdown" = "platformer", refMode: "style" | "players" = "style"): { prompt: string; size: string } {
   const original = "Completely original design; do not resemble any existing game, character, mascot, logo or brand. No text, no letters, no watermark.";
-  const style = hasRef
-    ? `Match ONLY the art style, outline weight, shading and palette of the reference image. The subject is a different thing: ${subject}. Do not copy the reference character's body, face, hat or clothes.`
-    : `Subject: ${subject}.`;
+  const style = !hasRef
+    ? `Subject: ${subject}.`
+    : refMode === "players"
+      ? `Players uploaded the reference picture(s) for this game: follow their look, colors and art style closely (clean it up into polished game art), unless they show a real person, a logo or an existing character, in which case only borrow the colors and mood. Subject: ${subject}.`
+      : `Match ONLY the art style, outline weight, shading and palette of the reference image. The subject is a different thing: ${subject}. Do not copy the reference character's body, face, hat or clothes.`;
+  const td = genre === "topdown";
+  const magenta = "On a perfectly flat solid magenta (#FF00FF) background with nothing else, no shadow, no ground. Do not use magenta or pink-purple in the subject itself.";
+  if (name === "floor") return { prompt: `Seamless square floor texture for a top-down 2D game, seen straight from above, fills the ENTIRE image edge to edge, ${styleNote}. ${style} Subtle, low contrast, no objects, no characters, no perspective. ${original}`, size: "1024x1024" };
   switch (kindFor(name)) {
     case "background":
-      return { prompt: `Wide side-scrolling 2D game background, ${styleNote}. ${style} Scenic backdrop only: no characters, no creatures, no UI, soft depth, slightly muted so foreground sprites stand out. ${original}`, size: "1600x900" };
+      return { prompt: `Wide ${td ? "establishing view of the place where this top-down adventure happens" : "side-scrolling 2D game background"}, ${styleNote}. ${style} Scenic backdrop only: no characters, no creatures, no UI, soft depth, slightly muted so foreground sprites stand out. ${original}`, size: "1600x900" };
     case "tile":
-      return { prompt: `Seamless square 2D game ground tile texture that fills the ENTIRE image edge to edge, ${styleNote}. ${style} Top edge has a grassy or decorated lip, the rest is the solid material. Flat orthographic view, no perspective, no background. ${original}`, size: "1024x1024" };
+      return td
+        ? { prompt: `Seamless square wall block texture for a top-down 2D game, seen from above with a slightly lighter top edge, fills the ENTIRE image edge to edge, ${styleNote}. ${style} Solid material (stone, wood, hedge or bookshelf: whatever fits the world), no characters, no background. ${original}`, size: "1024x1024" }
+        : { prompt: `Seamless square 2D game ground tile texture that fills the ENTIRE image edge to edge, ${styleNote}. ${style} Top edge has a grassy or decorated lip, the rest is the solid material. Flat orthographic view, no perspective, no background. ${original}`, size: "1024x1024" };
     case "platform":
       return { prompt: `A single floating 2D platformer ledge piece, wide and short, side view, ${styleNote}. ${style} Centered on a perfectly flat solid magenta (#FF00FF) background with nothing else. ${original}`, size: "1024x1024" };
     case "cover":
-      return { prompt: `Key art for a cozy indie platformer, ${styleNote}. ${style} ${original}`, size: "1600x900" };
+      return { prompt: `Key art for a cozy indie ${td ? "top-down exploration" : "platformer"} game, ${styleNote}. ${style} ${original}`, size: "1600x900" };
     default:
-      return { prompt: `A single 2D platformer game sprite, full body, side view facing right, centered, clean bold outline, ${styleNote}. ${style} On a perfectly flat solid magenta (#FF00FF) background with nothing else, no shadow, no ground. Do not use magenta or pink-purple in the subject itself. ${original}`, size: "1024x1024" };
+      return td
+        ? { prompt: `A single 2D game sprite for a top-down adventure, full body, cute three-quarter view from slightly above, facing the camera, centered, clean bold outline, ${styleNote}. ${style} ${magenta} ${original}`, size: "1024x1024" }
+        : { prompt: `A single 2D platformer game sprite, full body, side view facing right, centered, clean bold outline, ${styleNote}. ${style} ${magenta} ${original}`, size: "1024x1024" };
   }
 }

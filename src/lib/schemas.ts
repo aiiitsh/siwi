@@ -2,10 +2,14 @@ import { z } from "zod";
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
-export const SPRITE_NAMES = ["hero", "enemy", "enemy2", "collectible", "powerup", "goal", "hazard", "tile", "platform", "background"] as const;
+export const SPRITE_NAMES = ["hero", "enemy", "enemy2", "collectible", "powerup", "goal", "hazard", "tile", "platform", "floor", "key", "door", "lamp", "background"] as const;
+
+export const GENRES = ["platformer", "topdown"] as const;
 
 export const Design = z.object({
   title: z.string().min(1).max(40),
+  genre: z.enum(GENRES),
+  lighting: z.enum(["day", "dusk", "dark"]),
   tagline: z.string().max(120),
   story: z.string().max(400),
   hero: z.object({ name: z.string().max(30), look: z.string().max(300) }),
@@ -17,6 +21,7 @@ export const Design = z.object({
     .array(z.object({ name: z.string().regex(/^[a-z][a-z0-9]{1,15}$/), role: z.string().max(60), prompt: z.string().max(400) }))
     .min(6)
     .max(12),
+  credits: z.array(z.object({ name: z.string().max(30), used: z.string().max(140) })).max(8),
 });
 export type Design = z.infer<typeof Design>;
 
