@@ -5,7 +5,7 @@ import { buildGameHtml } from "@/lib/gameHtml";
 import ExamplePlay from "./ExamplePlay";
 
 export const dynamic = "force-static";
-const EXAMPLES: Record<string, string> = { "meadow-hop": "Meadow Hop", "gravity-garden": "Gravity Garden" };
+const EXAMPLES: Record<string, string> = { "meadow-hop": "Meadow Hop", "gravity-garden": "Gravity Garden", "candle-manor": "Candle Manor" };
 
 export function generateStaticParams() {
   return Object.keys(EXAMPLES).map((slug) => ({ slug }));

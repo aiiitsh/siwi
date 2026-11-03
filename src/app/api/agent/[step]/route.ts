@@ -3,7 +3,7 @@ import { z } from "zod";
 import sharp from "sharp";
 import type { Trace } from "@/lib/callModel";
 import { callImage } from "@/lib/callModel";
-import { runDesign, runCode, runVerdict, runPatch, runDecide, runCommunity, runProposal, runUpgradeCode, type PlayReport } from "@/lib/agents";
+import { runDesign, runCode, runVerdict, runPatch, runDecide, runCommunity, runIdeaCommunity, runProposal, runUpgradeCode, type PlayReport } from "@/lib/agents";
 import { Design, Proposal, Bug } from "@/lib/schemas";
 import { lintGame } from "@/lib/lint";
 import { runEstimate, runEstimateNew } from "@/lib/estimate";
@@ -38,6 +38,7 @@ const Body = {
   patch: z.object({ code: z.string().max(60000), bugs: z.array(Bug).min(1).max(10), wonder: z.boolean().default(false) }),
   decide: z.object({ status: z.any() }),
   community: z.object({ design: Design }),
+  idea_comments: z.object({ idea: z.string().min(3).max(400), thread: z.array(z.string().max(600)).max(40).default([]) }),
   proposal: z.object({ design: Design, comments: z.array(z.object({ name: z.string().max(30), body: z.string().max(500) })).min(1).max(40), open: z.boolean().default(false) }),
   upgrade: z.object({ design: Design, proposal: Proposal, code: z.string().max(60000) }),
   estimate: z.object({ design: Design, proposal: Proposal, code: z.string().max(60000), s1OutputTokens: z.number().optional() }),
@@ -99,6 +100,10 @@ async function handle(step: string, json: unknown, trace: Trace[]): Promise<Reco
     case "community": {
       const { design } = Body.community.parse(json);
       return { comments: await runCommunity(design, trace) };
+    }
+    case "idea_comments": {
+      const { idea, thread } = Body.idea_comments.parse(json);
+      return { comments: await runIdeaCommunity(idea, thread, trace) };
     }
     case "proposal": {
       const { design, comments, open } = Body.proposal.parse(json);

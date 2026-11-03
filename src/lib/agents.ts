@@ -199,6 +199,18 @@ export async function runCommunity(design: Design, trace: Trace[]) {
   return r.data.comments;
 }
 
+/** Demo players reacting to a fresh idea post: concrete details they want in the game. */
+export async function runIdeaCommunity(idea: string, existing: string[], trace: Trace[]) {
+  const r = await callChat({
+    agent: "siwi", step: "simulate_players", trace, schema: Community, schemaName: "thread", reasoningEffort: "low",
+    messages: [
+      { role: "system", content: "Write 4 to 5 short comments from different players under a game idea someone posted on a game-crowdfunding feed. Each adds ONE concrete detail they'd pay for: the hero's look or name, a mechanic, a place or level, an item, a mood, a friendly critter. Casual tone, distinct first names (not Maya, Leo, Noor, Sam, Aiko, Kofi or Priya), no repeats of details already in the thread. Gentle and original only: no violence, no brands or existing characters." },
+      { role: "user", content: JSON.stringify({ idea, thread: existing.slice(-12) }) },
+    ],
+  });
+  return r.data.comments;
+}
+
 export async function runProposal(design: Design, comments: { name: string; body: string }[], trace: Trace[], useOpen = false) {
   const r = await callChat({
     agent: useOpen ? "open" : "spark", step: "proposal", trace, schema: Proposal, schemaName: "season_proposal", reasoningEffort: "medium",
