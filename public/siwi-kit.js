@@ -64,6 +64,36 @@
   });
   addEventListener("blur", () => { for (const k in input.down) input.down[k] = false; });
 
+  /* ------------------------------------------------------------------ touch controls (phones / tablets) */
+  function addTouchControls() {
+    if (!(window.matchMedia && matchMedia("(pointer: coarse)").matches)) return;
+    const css = document.createElement("style");
+    css.textContent =
+      ".siwi-pad{position:fixed;bottom:2vmin;display:flex;gap:2vmin;z-index:5;user-select:none;-webkit-user-select:none;touch-action:none}" +
+      ".siwi-pad button{width:clamp(34px,13vmin,64px);height:clamp(34px,13vmin,64px);border-radius:50%;border:2px solid rgba(255,255,255,.3);background:rgba(11,16,48,.35);" +
+      "color:#fff;font:800 clamp(14px,5vmin,24px) Inter,system-ui,sans-serif;touch-action:none;opacity:.8}" +
+      ".siwi-pad button.on{background:rgba(255,111,165,.55)}";
+    document.head.appendChild(css);
+    const pad = (side, keys) => {
+      const el = document.createElement("div");
+      el.className = "siwi-pad";
+      el.style[side] = "14px";
+      for (const [k, label] of keys) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        const on = (e) => { e.preventDefault(); b.classList.add("on"); input._set(k, true); };
+        const off = (e) => { e.preventDefault(); b.classList.remove("on"); input._set(k, false); };
+        b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off);
+        b.addEventListener("pointercancel", off); b.addEventListener("pointerleave", off);
+        el.appendChild(b);
+      }
+      document.body.appendChild(el);
+    };
+    pad("left", [["left", "◀"], ["right", "▶"]]);
+    pad("right", [["action", "✦"], ["jump", "▲"]]);
+  }
+  if (document.body) addTouchControls(); else addEventListener("DOMContentLoaded", addTouchControls);
+
   /* ------------------------------------------------------------------ audio (tiny WebAudio beeps, no files) */
   const audio = {
     ctx: null,
@@ -149,7 +179,12 @@
       canvas, ctx, width, height, images: {}, paused: false, frame: 0, time: 0,
       restart() { if (opts.init) opts.init(game); },
     };
-    let acc = 0, last = 0, started = false;
+    let acc = 0, last = 0, started = false, userActive = false;
+    // Auto-pause when a real player clicks away (never during the Tester's scripted run, which has no user input).
+    const wake = (e) => { if (e && e.isTrusted) userActive = true; if (game.autoPaused) { game.paused = false; game.autoPaused = false; } };
+    addEventListener("keydown", wake, true);
+    addEventListener("pointerdown", wake, true);
+    addEventListener("blur", () => { if (userActive && !game.paused) { game.paused = true; game.autoPaused = true; } });
     function frame(ts) {
       requestAnimationFrame(frame);
       if (!last) last = ts;
@@ -168,7 +203,8 @@
       opts.draw && opts.draw(game, ctx);
       if (game.paused) {
         ctx.fillStyle = "rgba(7,9,26,.6)"; ctx.fillRect(0, 0, width, height);
-        text(ctx, "PAUSED", width / 2, height / 2, 48, "#fff", "center");
+        text(ctx, "PAUSED", width / 2, height / 2 - 14, 48, "#fff", "center");
+        text(ctx, game.autoPaused ? "click or press any key to keep playing" : "press P to resume", width / 2, height / 2 + 32, 20, "rgba(255,255,255,.75)", "center", 600);
       }
     }
     loadImages(opts.assets).then((imgs) => {
@@ -288,9 +324,13 @@
       jumpsLeft = 0;
     }
 
+    let firstLoad = true;
     function reset() {
       state.score = 0; state.lives = P.lives; powers = {};
-      loadLevel(0);
+      // SIWI_START_LEVEL lets the page open straight into a level (e.g. the new Season 2 level).
+      const start = firstLoad ? clamp((window.SIWI_START_LEVEL | 0), 0, levels.length - 1) : 0;
+      firstLoad = false;
+      loadLevel(start);
     }
 
     /* ----- tiles */

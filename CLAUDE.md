@@ -34,9 +34,10 @@ Gold #FFC83D money, red #FF5A6E bugs. Background navy #0B1030 to #07091A. Fonts:
 - The browser drives the pipeline by calling short server routes step by step. Siwi's route returns a tool call; the browser executes it and reports back. Every step writes an `events` row.
 - Hard caps: 3 patch loops, 1 Wonder escalation, about 20 images per game, per-game budget cap shown in the UI.
 - The model never writes an engine. It writes `game.js` against our hand-written `public/siwi-kit.js`. Output is one HTML file with the kit, assets (data URIs), game code and harness inlined.
-- Every model call goes through `src/lib/callModel.ts` (`callChat`, `callImage`): logs model, tokens, cost, latency, and writes an event. Validate every model output with zod.
+- Every model call goes through `src/lib/callModel.ts` (`callChat`, `callImage`): logs model, tokens, cost, latency, and returns a trace the browser stores as events. Validate every model output with zod.
+- **No database** (Ahmed, 2026-11-03: no Supabase spending). Server routes (`/api/agent/[step]`) are stateless; each game lives in the player's browser (IndexedDB, `src/lib/client/db.ts`). Pre-built showcase games ship as static JSON in `public/showcase/`.
 - Prompts live in `prompts/` as versioned files. Prices are in `config/pricing.ts`. API facts are in `docs/meta-api-notes.md` (read it before touching an integration; do not guess params).
-- Defaults: `reasoning_effort` medium, high only for code generation. Cache every generation in the DB.
+- Defaults: `reasoning_effort` medium (game.js too: high took 4.6 min live), high for patches, low for Siwi's decisions. Cache every generation in the browser record.
 - Keys are server-only. `.env*` is gitignored; never print or commit keys.
 - Be honest in the UI: label simulated pledges ("Demo: no real payments") and replays.
 
@@ -52,5 +53,9 @@ Small commits with clear messages. After each milestone, run the flow end to end
 ## Status (update as you go)
 - 2026-11-03 04:30 ET: M1 code done (no live call yet: first sandbox had no network to api.meta.ai). M2 done: `public/siwi-kit.js`, `public/siwi-harness.js`, `examples/*.game.js`, `src/lib/playtester.ts` (browser Tester, 7 deterministic checks), `/examples/[slug]` page, `scripts/playtest.mjs` (headless run of any game.js).
 - Gotcha: the Tester iframe must stay on-screen and painted (tiny, opacity .02). Offscreen/invisible iframes get rAF throttled and every check fails.
-- Next: run `/api/health/spark` and `/api/health/image` live and fill the verification log in docs/meta-api-notes.md; create Supabase project "siwi" (Ahmed approved a new free project in org Gaimiz) and apply supabase/migrations/0001_init.sql; then M3.
+- 2026-11-03 05:00 ET: Live API verified (see docs/meta-api-notes.md log). Supabase dropped. M3-M8 code written: agents (`src/lib/agents.ts`), guardrails (`src/lib/pipeline.ts`), browser runner (`src/lib/client/runner.ts`), crew theater, Season 2 (thread, proposal, token-counted estimate, pledges, upgrade). Work happens on branch `claude/project-thread-uxva81`; Vercel deploys main.
+- Gotcha: Meta's API sometimes returns 504 "request timed out"; the SDK retries (maxRetries 3) and the browser retries each step once.
+- 2026-11-03 06:50 ET: Full flow verified end to end (S1, S2, bug drill). 3 showcase builds in public/showcase (export with scripts/export-showcase.mjs). PR #1 opened to main; Vercel deploys on merge.
+- Gotcha: the visible Tester container must hold only one iframe (replaceChildren), or re-tests render offscreen and get rAF-throttled.
+- Gotcha: don't edit src/ while an e2e run is going on the dev server; hot reload restarts the build.
 - Vercel: project `siwi` under team siwi3, auto-deploys from main; MODEL_API_KEY set there.
