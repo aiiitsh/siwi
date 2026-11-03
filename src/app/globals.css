@@ -52,3 +52,15 @@ body::before {
 
 .mono { font-family: var(--font-mono); }
 @media (prefers-reduced-motion: reduce) { .siwi-bg::before, .siwi-bg::after { animation: none; } }
+
+/* crew */
+@keyframes crew-bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-3px) } }
+.crew-bob { animation: crew-bob .9s ease-in-out infinite; }
+@keyframes crew-ring { 0% { opacity: .9; transform: scale(.92) } 100% { opacity: 0; transform: scale(1.12) } }
+.crew-ring { transform-origin: 24px 24px; animation: crew-ring 1.4s ease-out infinite; }
+.crew-dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
+@keyframes dots { 0% { content: "" } 25% { content: "." } 50% { content: ".." } 75% { content: "..." } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.97) } to { opacity: 1; transform: none } }
+.pop-in { animation: pop-in .35s cubic-bezier(.2,.9,.3,1.2) both; }
+.checker { background-color: #1a2148; background-image: linear-gradient(45deg, #222a57 25%, transparent 25%), linear-gradient(-45deg, #222a57 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222a57 75%), linear-gradient(-45deg, transparent 75%, #222a57 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }

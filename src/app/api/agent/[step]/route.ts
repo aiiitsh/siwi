@@ -6,6 +6,7 @@ import { callImage } from "@/lib/callModel";
 import { runDesign, runCode, runVerdict, runPatch, runDecide, runCommunity, runProposal, runUpgradeCode, type PlayReport } from "@/lib/agents";
 import { Design, Proposal, Bug } from "@/lib/schemas";
 import { lintGame } from "@/lib/lint";
+import { runEstimate } from "@/lib/estimate";
 import { processImage, kindFor, spritePrompt } from "@/lib/images";
 import { openConfigured } from "@/lib/meta";
 import type { BuildStatus } from "@/lib/pipeline";
@@ -33,6 +34,7 @@ const Body = {
   community: z.object({ design: Design }),
   proposal: z.object({ design: Design, comments: z.array(z.object({ name: z.string().max(30), body: z.string().max(500) })).min(1).max(40), open: z.boolean().default(false) }),
   upgrade: z.object({ design: Design, proposal: Proposal, code: z.string().max(60000) }),
+  estimate: z.object({ design: Design, proposal: Proposal, code: z.string().max(60000), s1OutputTokens: z.number().optional() }),
 };
 
 export async function POST(req: Request, { params }: { params: Promise<{ step: string }> }) {
@@ -99,6 +101,10 @@ async function handle(step: string, json: unknown, trace: Trace[]): Promise<Reco
     case "upgrade": {
       const { design, proposal, code } = Body.upgrade.parse(json);
       return await runUpgradeCode(design, proposal, code, trace);
+    }
+    case "estimate": {
+      const { design, proposal, code, s1OutputTokens } = Body.estimate.parse(json);
+      return { estimate: await runEstimate(design, proposal, code, s1OutputTokens) };
     }
     default:
       throw new Error(`unknown step ${step}`);

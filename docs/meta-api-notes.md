@@ -75,8 +75,10 @@ Read from the official docs at https://dev.meta.ai/docs (ai.developer.meta.com/d
 ## Open weights (S1)
 - Muse Spark Open on Baseten: model `meta-models/muse-spark-open-1026` (hackathon-provided id). To verify: endpoint URL and auth from Baseten.
 
-## Live verification log
-- [ ] `GET /v1/models` from Canada
-- [ ] Muse Spark chat + structured output
-- [ ] Muse Image generation (format, latency, magenta keying quality)
-- [ ] Muse Image edits with reference image
+## Live verification log (2026-11-03, cloud env, Ahmed's key)
+- [x] `GET /v1/models`: muse-wonder-1.0, sam-3.1, muse-spark-1.3(-contributor), 1.2(-contributor), 1.1, muse-voice-transcribe-1.0, muse-image-1.0.
+- [x] Muse Spark chat + `json_schema` structured output: ~5 s at `low`. Usage includes `reasoning_tokens` and `cached_tokens` (prompt cache hit confirmed: 3,953 of 4,057 input tokens cached on the second code call).
+- [x] Code generation latency: `high` = 278 s / 29.8k output tokens ($0.13); `medium` = 153 s / 15.2k ($0.065). We use `medium` for game.js, `high` for patches.
+- [x] Muse Image generations: ~9-11 s at `reasoning_strength: low`. **Always returns 1600x1600 PNG** for `size: 512x512`; `size` only sets aspect. `background: "opaque"`. Magenta (#FF00FF) keying with sharp works cleanly.
+- [x] Muse Image edits with a reference image (JSON `images: [{image_url: data URL}]`): ~14 s. **It copies the reference subject heavily** unless the prompt says "match ONLY the art style ... the subject is a different thing ... do not copy the reference character's body". With that wording, style consistency is excellent.
+- [x] Token counting `POST /v1/responses/input_tokens` works with `input` as a **string** (`{"object":"response.input_tokens","input_tokens":171}`); the message-array form timed out once. `/v1/messages/count_tokens` timed out.
