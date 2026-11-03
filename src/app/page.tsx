@@ -19,14 +19,12 @@ const IDEAS = [
   "a paper crane delivering letters across rooftops at sunset",
 ];
 
-const HOW = [
-  ["Post an idea", "One sentence, plus pictures or drawings if you have them."],
-  ["Players shape it", "Upvote, add details, attach art. Spark reads all of it."],
-  ["Siwi prices it", "Spark designs it, Siwi counts the real tokens: a price in cents."],
-  ["Buy in, split it", "The price is split across buyers. Each new buyer lowers everyone's share; earlier buyers get credits back."],
-  ["The crew builds", "Agents on Meta's models write, paint, playtest and fix the game live."],
-  ["Buyers play", "Then Season 2: the thread votes, the crew upgrades the same game."],
-] as const;
+const HOW: { title: string; sub: string; crew: ("siwi" | "spark" | "pixel" | "tester" | "fixer")[]; badge?: string }[] = [
+  { title: "Post an idea", sub: "a sentence, a drawing", crew: ["spark"], badge: "💡" },
+  { title: "Siwi prices it", sub: "a few cents, real tokens", crew: ["siwi"], badge: "39¢" },
+  { title: "Friends split it", sub: "more buyers, cheaper each", crew: [], badge: "÷" },
+  { title: "The crew builds it", sub: "then buyers play", crew: ["pixel", "tester", "fixer"] },
+];
 
 export default function Home() {
   const router = useRouter();
@@ -78,16 +76,27 @@ export default function Home() {
             <span className="bg-gradient-to-r from-siwi via-spark to-pixel bg-clip-text text-transparent">Players split the cost. AI agents build it.</span>
           </h1>
           <p className="mx-auto mt-3 max-w-2xl text-white/70">
-            A crew of agents on Meta&apos;s models designs, codes, paints and playtests the game for a few cents. Everyone who buys in co-owns it, and every new buyer makes it cheaper for the ones before.
+            A crew of AI agents on Meta&apos;s models builds the game for a few cents. Everyone who buys in owns it, and each new buyer makes it cheaper for the ones before.
           </p>
         </section>
 
-        <ol className="mx-auto mt-6 grid max-w-5xl grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {HOW.map(([t, d], i) => (
-            <li key={t} className="rounded-2xl border border-white/10 bg-white/[.03] p-3">
-              <div className="mono text-[10px] text-siwi">step {i + 1}</div>
-              <div className="text-sm font-extrabold">{t}</div>
-              <div className="mt-0.5 text-[11px] leading-snug text-white/55">{d}</div>
+        <ol className="mx-auto mt-7 flex max-w-4xl flex-wrap items-stretch justify-center gap-2 sm:flex-nowrap">
+          {HOW.map((h, i) => (
+            <li key={h.title} className="flex items-center gap-2">
+              <div className="flex w-36 flex-col items-center rounded-3xl border border-white/10 bg-white/[.04] px-3 py-4 text-center sm:w-44">
+                <div className="flex h-14 items-center justify-center gap-0.5">
+                  {h.crew.map((c, k) => <div key={c} className="crew-bob" style={{ animationDelay: `${(i + k) * 0.18}s` }}><Avatar id={c} size={h.crew.length > 1 ? 38 : 50} /></div>)}
+                  {h.badge && !h.crew.length && (
+                    <div className="flex items-end gap-1">
+                      {[34, 26, 20].map((d, k) => <span key={k} className="crew-bob flex items-center justify-center rounded-full bg-gold font-black text-navy shadow-[0_0_14px_-2px_#FFC83D]" style={{ width: d, height: d, fontSize: d * 0.45, animationDelay: `${k * 0.2}s` }}>$</span>)}
+                    </div>
+                  )}
+                  {h.badge && h.crew.length > 0 && <span className="mono -ml-1 self-start rounded-full bg-gold px-1.5 text-[11px] font-bold text-navy">{h.badge}</span>}
+                </div>
+                <div className="mt-2 text-base font-extrabold leading-tight">{h.title}</div>
+                <div className="text-[11px] text-white/55">{h.sub}</div>
+              </div>
+              {i < HOW.length - 1 && <span className="hidden text-2xl text-white/30 sm:block">→</span>}
             </li>
           ))}
         </ol>
